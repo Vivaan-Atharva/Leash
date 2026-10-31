@@ -41,10 +41,23 @@ and can sign with a key of their own. They do **not** control the phone, the gat
   allowed shop) passes the checks. Step-up asks Asha when it's a new brand or a large order.
 - **Order splitting and duplicates** under the weekly cap pass: each order is individually valid.
 - **Reference catalogue correctness:** check 5 is only as good as the gateway's reference prices.
-- **Whole-chain rewrite:** the hash chain detects edits, but someone with write access to the gateway's
-  database could rebuild the whole chain. Fix: periodically sign and publish the chain head (not built).
+- **Whole-chain rewrite:** the hash chain alone can't stop someone with database write access rebuilding it.
+  The Merkle log helps: every append produces a gateway-signed tree head, and any report holding an older
+  signed head plus its inclusion proof exposes a rewrite. Publishing tree heads to outside witnesses
+  (as Certificate Transparency monitors do) is the next step; it isn't built.
+- **Provenance is attribution:** the attack trace comes from the agent runtime and matches values to text.
+  It can miss paraphrased values and could be forged by a compromised runtime, so it never affects a decision.
+- **Formal model ≠ code:** Z3 proves bounds for a model of the checks. The differential test compares the two
+  on random requests; it is evidence, not a proof that the Python code equals the model.
 - **Demo shortcuts:** keys are files in `keys/`, the phone key lives in browser `localStorage`, services
   talk over plain HTTP on a local network, and the shop sites and rail are mocks.
+
+## Proven exposure (Z3, Asha's mandate)
+| Defence | Total | To the wrong shop | Off-list items | Above fair price |
+|---|---|---|---|---|
+| No protection | ₹5,000 | ₹5,000 | ₹5,000 | ₹5,000 |
+| Today's rails | ₹500/wk | ₹500/wk | ₹500/wk | ₹500/wk |
+| Leash | ₹500/wk | ₹0 | ₹0 | ₹59.40/wk |
 
 ## Why no LLM in the money path
 Same input plus same state gives the same decision, every time. A judge can write any injection in the

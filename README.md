@@ -44,6 +44,22 @@ Each service is its own process with its own SQLite file and its own key (separa
 After all six pass, **step-up** can hold an order (new brand, or over 70% of the per-order cap) until Asha
 approves it on her phone. Decisions take about 2 ms.
 
+## Beyond the checks: what makes this more than if-statements
+| Layer | What it does | Grounded in |
+|---|---|---|
+| **Gateway as reference monitor** | The agent's key moves no money. Every payment is mediated, the decision code is small, pure and deterministic, and the rail only honours gateway-signed debits. | Anderson's reference monitor; capability-based security |
+| **Provenance ledger → attack trace** | The agent runtime labels everything the model reads (TRUSTED task vs UNTRUSTED page text, and *how* text was hidden). Each payment field is traced to its source, so Mission Control shows the whole chain: hidden text → context → reasoning → tool call → signed request → both lanes. | CaMeL (Google DeepMind, 2025), FIDES (Microsoft Research, 2025) |
+| **Counterfactual replay** | The same agent re-runs the same task on the clean page, as a dry run through `POST /evaluate` (no log entry, no money moved). It proves what the injection *caused*: "the hidden text turned ×1 into ×40". | Causal attribution by intervention |
+| **Proven worst case** | The mandate and each defence become linear integer constraints over a fully hijacked agent. Z3 maximises total loss, money to the wrong shop, money on off-list items, and overpayment, and returns the optimal attack as a witness. A differential test checks the model against the real Python checks on 250 random requests. | Z3 SMT solver; formal verification |
+| **Transparency log** | Every log entry is also a Merkle leaf; the gateway signs a tree head after each append. Reports carry an inclusion proof the browser verifies itself (SHA-256 + Ed25519). | Certificate Transparency, RFC 6962 / 9162 |
+
+For Asha's mandate, Z3 proves: without Leash a hijacked agent can take **₹5,000**; under today's rails **₹500/week,
+all of which can go to the wrong shop, on off-list items, or as pure overpayment**; under Leash **₹500/week, ₹0 to the
+wrong shop, ₹0 off-list, at most ₹59.40 above fair price**.
+
+The trace is attribution, not enforcement: it runs in the agent runtime, which the threat model treats as untrusted
+(FIDES labels have been shown to be forgeable). The six checks decide; the trace explains.
+
 ## Run it
 Needs Python 3.11+, Node 20+, and [Ollama](https://ollama.com) for LIVE mode.
 ```
@@ -65,7 +81,8 @@ make golden                # once: record LIVE runs of S0–S5 as REPLAY backups
 | `/preflight` | Is everything ready? |
 
 **Director keys (Mission Control):** `→`/`Space` next moment · `←` back · `0`–`9` jump to scenario ·
-`X` X-ray · `T` tamper/restore · `L` LIVE↔REPLAY · `R` reset · `F` fullscreen · click a stamp for its report.
+`X` X-ray · `A` attack trace · `P` proven worst case · `T` tamper/restore · `L` LIVE↔REPLAY · `R` reset ·
+`F` fullscreen · click a stamp for its report.
 
 **Modes:** LIVE runs the LLM. REPLAY replays a golden trace's reasoning, but every tool call and payment
 is re-run live through the gateway and rail. SCRIPTED (no LLM, no golden trace) is the last-resort
