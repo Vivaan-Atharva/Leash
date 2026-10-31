@@ -27,6 +27,7 @@ EVENTS: deque = deque(maxlen=2000)
 CLIENTS: set[WebSocket] = set()
 _seq = 0
 _mode = {"mode": "LIVE"}
+PHONE = {"last": 0.0}
 ACTIVE = {"scenario": None, "name": None, "attack": False, "mode": None}
 SCORE = {"left_paid_paise": 0, "right_paid_paise": 0, "left_lost_paise": 0, "right_lost_paise": 0}
 
@@ -170,6 +171,13 @@ async def demo_reset():
     return {"ok": all(out.values()), "services": out}
 
 
+@app.post("/phone/heartbeat")
+async def phone_heartbeat():
+    import time
+    PHONE["last"] = time.time()
+    return {"ok": True}
+
+
 @app.post("/mode")
 async def set_mode(body: dict = Body(...)):
     if body.get("mode") in ("LIVE", "REPLAY"):
@@ -209,6 +217,10 @@ async def preflight():
                   and not (traces_dir() / "golden" / f"{sid}.json").exists()]
         add("golden traces S0–S5", not golden,
             "all present" if not golden else f"missing {', '.join(golden)} (REPLAY falls back to SCRIPTED)",
+            required=False)
+        import time
+        age = time.time() - PHONE["last"]
+        add("phone connected", age < 10, f"last heartbeat {int(age)} s ago" if PHONE["last"] else "no phone yet",
             required=False)
         try:
             r = await client.get("http://127.0.0.1:11434/api/tags")
