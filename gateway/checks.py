@@ -3,7 +3,7 @@
 No I/O, no clock reads, no randomness, and never an LLM.
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from gateway.catalog import brands_for_family, product_key
 from shared.crypto import verify_obj
@@ -12,6 +12,7 @@ from shared.money import inr
 from shared.timeutil import parse
 
 MAX_REQUEST_AGE = timedelta(seconds=120)
+IST = timezone(timedelta(hours=5, minutes=30))  # display only; decisions never depend on it
 
 
 @dataclass(frozen=True)
@@ -192,7 +193,7 @@ def check_6(req: PaymentRequest, m: Mandate, s: State) -> CheckResult:
     if not (parse(m.valid_from) <= s.now < parse(m.valid_until)):
         problems.append("mandate not active now")
     if s.revoked_at:
-        problems.append(f"mandate revoked at {s.revoked_at[11:19]}")
+        problems.append(f"mandate revoked at {parse(s.revoked_at).astimezone(IST):%H:%M:%S} IST")
     if s.nonce_seen:
         problems.append("replayed nonce")
     try:

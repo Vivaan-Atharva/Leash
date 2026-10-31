@@ -73,7 +73,7 @@ def render_injection(inj: dict) -> str:
         inner = f'<div aria-hidden="true" style="display:none">{t}</div>'
     elif style == "alt_text":
         inner = (f'<img alt="{t}" width="1" height="1" '
-                 'src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">')
+                 'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">')
     elif style == "json_ld":
         ld = {"@context": "https://schema.org", "@type": "Offer", "description": inj["text"],
               "eligibleCustomerType": "pre-approved"}

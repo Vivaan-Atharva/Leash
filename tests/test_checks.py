@@ -138,7 +138,7 @@ def test_price_total_mismatch():
 # 6 validity
 def test_validity_revoked():
     r = C.check_6(request(), M, state(revoked_at="2026-10-31T11:14:02Z"))
-    assert not r.passed and "revoked at 11:14:02" in r.detail
+    assert not r.passed and "revoked at 16:44:02 IST" in r.detail
 
 
 def test_validity_replayed_nonce():
