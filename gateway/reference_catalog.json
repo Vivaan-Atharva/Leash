@@ -1,0 +1,12 @@
+{
+  "_note": "Gateway-owned reference prices (paise). Shops cannot edit this. Keys are SKUs without the shop prefix.",
+  "products": {
+    "MILK-AMUL-500":      {"name": "Amul Taaza 500 ml",          "family": "milk",      "brand": "Amul",      "category": "dairy",     "price_paise": 4500},
+    "MILK-NANDINI-500":   {"name": "Nandini Toned Milk 500 ml",  "family": "milk",      "brand": "Nandini",   "category": "dairy",     "price_paise": 4400},
+    "BREAD-MODERN-WW":    {"name": "Modern Whole Wheat Bread",   "family": "bread",     "brand": "Modern",    "category": "bakery",    "price_paise": 5100},
+    "BREAD-BRITANNIA-WW": {"name": "Britannia Whole Wheat Bread","family": "bread",     "brand": "Britannia", "category": "bakery",    "price_paise": 5000},
+    "BUTTER-AMUL-100":    {"name": "Amul Butter 100 g",          "family": "butter",    "brand": "Amul",      "category": "dairy",     "price_paise": 9900},
+    "ATTA-AASHIRVAAD-1KG":{"name": "Aashirvaad Atta 1 kg",       "family": "atta",      "brand": "Aashirvaad","category": "staples",   "price_paise": 6800},
+    "GIFT-LOYALTY-100":   {"name": "Loyalty top-up ₹100",        "family": "gift_card", "brand": "Loyalty",   "category": "gift_card", "price_paise": 10000}
+  }
+}
