@@ -88,3 +88,22 @@ def test_report_for_blocked_attack(stack):
 def test_stepup_config_route_is_not_a_decision_id(stack):
     r = httpx.post(f"{url('gateway')}/stepup/config", json={"enabled": False})
     assert r.status_code == 200 and r.json() == {"enabled": False}
+
+
+def test_report_carries_a_merkle_inclusion_proof(stack):
+    from gateway import merkle as M
+    from shared.crypto import verify_obj
+    http = httpx.Client(timeout=10)
+    R.reset(http)
+    did = R.run(["S1"])[0]["right"][0]["decision_id"]
+    m = http.get(f"{url('gateway')}/report/{did}").json()["merkle"]
+    assert m["verified_by_gateway"] and m["sth_signature_ok"] and verify_obj(m["sth"], m["gateway_pubkey"])
+    e = m["entry"]
+    leaf = M.leaf_hash(M.leaf_bytes(e["index"], e["timestamp"], e["type"], e["payload"], e["prev_hash"]))
+    assert M.verify_inclusion(m["leaf_index"], m["sth"]["tree_size"], leaf,
+                              [bytes.fromhex(h) for h in m["proof"]], bytes.fromhex(m["sth"]["root_hash"]))
+    idx = e["index"]
+    http.post(f"{url('gateway')}/demo/tamper", json={"index": idx})
+    assert http.get(f"{url('gateway')}/report/{did}").json()["merkle"]["verified_by_gateway"] is False
+    http.post(f"{url('gateway')}/demo/restore")
+    assert http.get(f"{url('gateway')}/report/{did}").json()["merkle"]["verified_by_gateway"] is True

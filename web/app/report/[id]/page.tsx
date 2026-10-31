@@ -5,6 +5,7 @@ import { CHECK_LABEL } from "@/components/Pipeline";
 import { api, getJSON } from "@/lib/hub";
 import { inr } from "@/lib/money";
 import { shopName } from "@/lib/friendly";
+import { verifyBundle } from "@/lib/merkle";
 
 type Report = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -57,6 +58,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   if (!r) return <main className="p-10 text-muted">Loading report…</main>;
 
   const d = r.decision, q = r.request, m = r.mandate, v = r.verdict;
+  const mk = r.merkle ? verifyBundle(r.merkle) : null;
   const tone = v.tone === "allowed" ? "border-success text-success" : v.tone === "held" ? "border-warn text-warn" : "border-danger text-danger";
   return (
     <main className={`report mx-auto flex max-w-5xl flex-col gap-5 px-6 ${embed ? "py-6" : "py-10"}`}>
@@ -77,6 +79,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
           <Tick ok={r.signatures.request} label="request signature valid" />
           <Tick ok={r.signatures.decision} label="decision signed by gateway" />
           <Tick ok={r.chain.ok && r.chain.decision_entry_matches} label="audit chain intact" />
+          <Tick ok={mk ? mk.included && mk.signed : null} label="Merkle proof verified in this browser" />
         </div>
       </div>
 
@@ -159,6 +162,20 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
           <Row k="Entry hash" v={`${(d.log_hash ?? "").slice(0, 24)}…`} mono />
           <Row k="Gateway key" v={r.fingerprints.gateway_key} mono />
         </Section>
+        <Section title="Transparency log" right={<Tick ok={mk ? mk.included && mk.signed : null} label="checked here, not by the server" />}>
+          {r.merkle && mk ? (
+            <>
+              <Row k="Leaf" v={<>entry #{r.merkle.entry?.index} → SHA-256 <span className="font-mono">{mk.leaf.slice(0, 16)}…</span></>} />
+              <Row k="Proof path" v={<span className="flex flex-wrap gap-1">{r.merkle.proof.map((h: string, i: number) => <span key={i} className="rounded border border-line px-1.5 font-mono text-xs">{h.slice(0, 8)}</span>)}{r.merkle.proof.length === 0 && "—"}</span>} />
+              <Row k="Root" v={<span className="font-mono">{r.merkle.sth.root_hash.slice(0, 24)}… {mk.included ? <span className="text-success">✓ matches</span> : <span className="text-danger">✕ does not match</span>}</span>} />
+              <Row k="Signed tree head" v={<>size {r.merkle.sth.tree_size} · {mk.signed ? <span className="text-success">✓ gateway signature valid</span> : <span className="text-danger">✕ bad signature</span>}</>} />
+              <div className="mt-2 text-xs text-muted">Certificate-Transparency-style log (RFC 6962). Your browser recomputed the leaf from the entry, walked the proof to the root, and checked the gateway&apos;s Ed25519 signature on the tree head.</div>
+            </>
+          ) : <div className="text-muted">No proof available.</div>}
+        </Section>
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-1">
         <Section title="Timeline">
           {r.timeline.map((t: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
             <div key={t.index} className="flex gap-3 border-b border-line/40 py-1.5 font-mono text-sm last:border-0">

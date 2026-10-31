@@ -7,7 +7,7 @@ from gateway import audit
 from shared.config import data_dir
 
 SCHEMA = [
-    audit.SCHEMA,
+    *audit.SCHEMAS,
     "CREATE TABLE IF NOT EXISTS mandates (mandate_id TEXT PRIMARY KEY, raw TEXT NOT NULL,"
     " created_at TEXT NOT NULL, revoked_at TEXT)",
     "CREATE TABLE IF NOT EXISTS agents (pubkey TEXT PRIMARY KEY)",
@@ -24,7 +24,7 @@ SCHEMA = [
     "CREATE TABLE IF NOT EXISTS brands (mandate_id TEXT, family TEXT, brand TEXT,"
     " PRIMARY KEY (mandate_id, family, brand))",
 ]
-TABLES = ["log", "mandates", "agents", "nonces", "spend", "decisions", "kv", "stepups", "brands"]
+TABLES = ["log", "merkle_leaves", "mandates", "agents", "nonces", "spend", "decisions", "kv", "stepups", "brands"]
 
 
 @contextmanager

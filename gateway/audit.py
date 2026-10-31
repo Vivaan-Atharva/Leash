@@ -16,6 +16,10 @@ TYPES = {"MANDATE_SIGNED", "REQUEST", "DECISION", "DEBIT", "REVOKE",
 SCHEMA = """CREATE TABLE IF NOT EXISTS log (
   idx INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL,
   payload TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL)"""
+# Merkle leaf hashes, written at append time (see gateway/merkle.py). Never recomputed from the log,
+# so editing a log row later can't silently update its leaf.
+MERKLE_SCHEMA = "CREATE TABLE IF NOT EXISTS merkle_leaves (idx INTEGER PRIMARY KEY, leaf TEXT NOT NULL)"
+SCHEMAS = [SCHEMA, MERKLE_SCHEMA]
 
 
 def entry_hash(index: int, timestamp: str, type_: str, payload: dict, prev_hash: str) -> str:
@@ -32,6 +36,9 @@ def append(conn: sqlite3.Connection, type_: str, payload: dict, timestamp: str) 
     h = entry_hash(index, timestamp, type_, payload, prev)
     conn.execute("INSERT INTO log VALUES (?,?,?,?,?,?)",
                  (index, timestamp, type_, canonical_json(payload).decode(), prev, h))
+    from gateway import merkle
+    leaf = merkle.leaf_hash(merkle.leaf_bytes(index, timestamp, type_, payload, prev)).hex()
+    conn.execute("INSERT INTO merkle_leaves VALUES (?,?)", (index, leaf))
     return {"index": index, "timestamp": timestamp, "type": type_,
             "payload": payload, "prev_hash": prev, "hash": h}
 

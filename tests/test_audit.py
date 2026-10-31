@@ -5,7 +5,8 @@ from gateway import audit
 
 def make_log(n=5):
     conn = sqlite3.connect(":memory:")
-    conn.execute(audit.SCHEMA)
+    for stmt in audit.SCHEMAS:
+        conn.execute(stmt)
     for i in range(n):
         audit.append(conn, "REQUEST", {"i": i, "amount_paise": 9600}, f"2026-10-31T11:0{i}:00Z")
     return conn
