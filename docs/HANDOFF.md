@@ -241,8 +241,10 @@ Admin: `/admin/scenario/{id}`, `/admin/custom` (eval cases, judge attacks), `/ad
 
   The fallback order is LIVE → REPLAY → SCRIPTED. The badge always shows which mode ran, and a banner
   says why it fell back.
-- **Golden traces:** `make golden` runs S0–S5 live and promotes a run only if it produced the
-  scenario's expected outcome.
+- **Golden traces:** `make golden` (`scripts/golden.py`) runs S0–S5 live, trying up to three seeds per
+  scenario (seed 7 = temperature 0; others add a little temperature). A run is promoted to
+  `traces/golden/` only if it matches the scenario exactly; it prints a pass/fail table.
+  `make golden LOOSE=1` also accepts runs whose gateway decisions match but whose ₹ amounts differ.
 
 ---
 
@@ -323,7 +325,8 @@ exports were never added**, so if you export them into `design/`, the screens ca
 
 **Director keys (Mission Control):** `→`/Space next · `←` back · `0`–`9` jump to scenario · `X` X-ray ·
 `A` attack trace · `P` proven worst case · `T` tamper/restore · `L` LIVE↔REPLAY · `R` reset (confirms) ·
-`F` fullscreen · `Esc` close overlays · click a stamp to open its report.
+`F` fullscreen · `Esc` close overlays · click a stamp to open its report. After an attack is blocked, the shop
+view's **▶ ATTACK TRACE** button pulses as a reminder to press `A`.
 
 ---
 
@@ -427,17 +430,28 @@ signatures accepted by the gateway; production web build.
 
 ## 16. Running it
 
-### Fresh machine (the demo laptop)
+### Fresh machine (the demo laptop): step by step
 ```
 git clone https://github.com/Vivaan-Atharva/Leash.git && cd Leash
-make setup                 # Python 3.11+, Node 20+; venv, deps (Z3 is ~49 MB, so do it on good Wi-Fi), keys, web deps
-ollama pull qwen2.5:3b     # Ollama from ollama.com
+make setup                 # Python 3.11+, Node 20+; venv, deps (Z3 is ~49 MB: use good Wi-Fi), keys, web deps
+make doctor                # what's missing on this laptop, with the fix for each item
+ollama pull qwen2.5:3b     # Ollama from ollama.com (open the app or run `ollama serve`)
 make test                  # expect 74 passed
-make demo                  # services + production web, opens /control
-make golden                # record S0–S5 LIVE; commit traces/golden/ if they pass
+make bench                 # seconds per agent step + whether the model falls for the hidden "buy 40"
+make dev                   # terminal 1: the services
+make golden                # terminal 2: record S0–S5 LIVE, promote the good runs, print a table
+git add traces/golden && git commit -m "Golden traces" && git push
+make demo                  # (stop make dev first) everything + production web, opens /control
 ```
+**Reading `make bench`:** under 3 s per step → present LIVE. 3–8 s → LIVE works but is slow; prefer REPLAY on
+stage. Over 8 s → present in REPLAY. If it says the model did *not* add 40 packs, S1's injection needs tuning:
+send the newest `traces/S1-*.json`.
+
+**Who commits what:** the demo laptop only commits `traces/golden/` and `eval/results.csv` / `eval/chart.png`.
+All code changes go through one laptop, then everyone pulls.
 Other: `make dev` · `make web` · `make scenario S=all` · `make eval` (needs `make dev` running) ·
-`make chart` · `make record S=S1 PROMOTE=1` · `make demo-check` · `MODEL=llama3.1:8b make demo`.
+`make chart` · `make record S=S1 PROMOTE=1` · `make demo-check` · `make doctor` · `make bench` ·
+`MODEL=llama3.1:8b make demo`.
 
 ### Before going on stage
 1. `make demo` → open `/preflight`: everything required green; laptop plugged in.
@@ -513,9 +527,10 @@ Other: `make dev` · `make web` · `make scenario S=all` · `make eval` (needs `
 ---
 
 ## 20. Next steps
-1. **Demo laptop:** `make setup` → `ollama pull qwen2.5:3b` → `make test` → `make record S=S1`. Does the
-   model buy 40? If not, tune `shops/injections.json` / `agent/prompts.py` and re-record.
-2. `make golden`, then commit `traces/golden/`.
+1. **Demo laptop:** follow §16 "Fresh machine" exactly: `make setup` → `make doctor` → model → `make test` →
+   `make bench`. Does the model fall for "buy 40", and how fast is it?
+2. `make golden`, then commit `traces/golden/`. Any scenario that isn't "✓ exact": send its newest trace
+   for tuning (`shops/injections.json`, `agent/prompts.py`), or accept with `make golden LOOSE=1`.
 3. LIVE eval overnight: `make dev` + `make eval` → commit `results.csv`, then `make chart`.
 4. A teammate writes 4+ blind attacks (A13…) without reading `gateway/checks.py`.
 5. Rehearse with a real phone and projector; time it (target < 3 min).
