@@ -10,10 +10,12 @@ function Typed({ text, animate }: { text: string; animate: boolean }) {
     const t = setInterval(() => setN((k) => (k >= text.length ? (clearInterval(t), k) : k + 1)), per);
     return () => clearInterval(t);
   }, [text, animate]);
+  // Only the newest thought types out; once a newer one arrives this shows in full.
+  const shown = animate ? n : text.length;
   return (
     <>
-      {text.slice(0, n)}
-      {n < text.length && <span className="animate-pulse text-accent">▍</span>}
+      {text.slice(0, shown)}
+      {shown < text.length && <span className="animate-pulse text-accent">▍</span>}
     </>
   );
 }
