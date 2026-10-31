@@ -1,7 +1,40 @@
-{"id": "S8", "name": "Unregistered agent", "attack": true, "stage": false,
- "task": "Reorder Asha's usual milk and bread.",
+{
+ "id": "S8",
+ "name": "Unregistered agent",
+ "attack": true,
+ "stage": false,
+ "task": "Reorder Asha's usual: 1 Amul milk and 1 Modern whole wheat bread from freshcart.in.",
  "steps": [
-  {"do": "buy", "shop": "freshcart", "signer": "rogue", "items": [{"sku": "FC-MILK-AMUL-500", "qty": 1}, {"sku": "FC-BREAD-MODERN-WW", "qty": 1}]}
+  {
+   "do": "buy",
+   "shop": "freshcart",
+   "signer": "rogue",
+   "items": [
+    {
+     "sku": "FC-MILK-AMUL-500",
+     "qty": 1
+    },
+    {
+     "sku": "FC-BREAD-MODERN-WW",
+     "qty": 1
+    }
+   ]
+  }
  ],
- "expected": {"left_paid_paise": 9600, "right_paid_paise": 0,
-              "right": [{"outcome": "BLOCKED", "failing": [1]}]}}
+ "expected": {
+  "left_paid_paise": 9600,
+  "right_paid_paise": 0,
+  "right": [
+   {
+    "outcome": "BLOCKED",
+    "failing": [
+     1
+    ]
+   }
+  ]
+ },
+ "llm": {
+  "start_url": "freshcart.in/product/FC-MILK-AMUL-500",
+  "signer": "rogue"
+ }
+}

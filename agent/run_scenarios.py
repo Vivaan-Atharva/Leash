@@ -41,9 +41,12 @@ def phone_revoke(http: httpx.Client, agent: ScriptedAgent) -> dict:
     return {"right": right, "left": left}
 
 
-def run_one(sc: dict, agent: ScriptedAgent, http: httpx.Client) -> dict:
-    http.post(f"{url('shops')}/admin/scenario/{sc['id']}").raise_for_status()
-    agent.emit("director.moment", {"scenario": sc["id"], "name": sc["name"], "task": sc.get("task")})
+def run_one(sc: dict, agent: ScriptedAgent, http: httpx.Client, announce: bool = True) -> dict:
+    if announce:
+        http.post(f"{url('shops')}/admin/scenario/{sc['id']}").raise_for_status()
+        http.post(f"{url('hub')}/director/active", json={
+            "scenario": sc["id"], "name": sc["name"], "attack": sc["attack"], "mode": "scripted"})
+        agent.emit("director.moment", {"scenario": sc["id"], "name": sc["name"], "task": sc.get("task")})
     routes = []
     for step in sc["steps"]:
         do = step["do"]
@@ -62,10 +65,16 @@ def run_one(sc: dict, agent: ScriptedAgent, http: httpx.Client) -> dict:
             phone_revoke(http, agent)
         else:
             raise ValueError(f"unknown step {do}")
-    right = [{"outcome": r["right"].get("decision", {}).get("outcome", "ERROR"),
-              "failing": [c["n"] for c in r["right"].get("decision", {}).get("checks", []) if not c["pass"]],
-              "decided_in_us": r["right"].get("decision", {}).get("decided_in_us"),
-              "decision_id": r["right"].get("decision", {}).get("decision_id")} for r in routes]
+    return evaluate(sc, routes)
+
+
+def evaluate(sc: dict, routes: list[dict]) -> dict:
+    """Compare what both lanes did against the scenario's expected outcome."""
+    decisions = [r["right"].get("decision", {}) for r in routes]
+    right = [{"outcome": d.get("outcome", "ERROR"),
+              "failing": [c["n"] for c in d.get("checks", []) if not c["pass"]],
+              "decided_in_us": d.get("decided_in_us"),
+              "decision_id": d.get("decision_id")} for d in decisions]
     result = {
         "id": sc["id"], "name": sc["name"], "attack": sc["attack"],
         "left_paid_paise": sum(r["left"]["amount_paise"] for r in routes),

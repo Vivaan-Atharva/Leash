@@ -29,3 +29,7 @@ def data_dir() -> Path:
 
 def keys_dir() -> Path:
     return Path(os.environ.get("LEASH_KEYS_DIR", ROOT / "keys"))
+
+
+def traces_dir() -> Path:
+    return Path(os.environ.get("LEASH_TRACES_DIR", ROOT / "traces"))

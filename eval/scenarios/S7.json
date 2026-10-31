@@ -1,8 +1,48 @@
-{"id": "S7", "name": "Replay", "attack": true, "stage": false,
- "task": "Reorder Asha's usual milk and bread.",
+{
+ "id": "S7",
+ "name": "Replay",
+ "attack": true,
+ "stage": false,
+ "task": "Reorder Asha's usual: 1 Amul milk and 1 Modern whole wheat bread from freshcart.in.",
  "steps": [
-  {"do": "buy", "shop": "freshcart", "items": [{"sku": "FC-MILK-AMUL-500", "qty": 1}, {"sku": "FC-BREAD-MODERN-WW", "qty": 1}]},
-  {"do": "replay_last"}
+  {
+   "do": "buy",
+   "shop": "freshcart",
+   "items": [
+    {
+     "sku": "FC-MILK-AMUL-500",
+     "qty": 1
+    },
+    {
+     "sku": "FC-BREAD-MODERN-WW",
+     "qty": 1
+    }
+   ]
+  },
+  {
+   "do": "replay_last"
+  }
  ],
- "expected": {"left_paid_paise": 19200, "right_paid_paise": 9600,
-              "right": [{"outcome": "ALLOWED", "failing": []}, {"outcome": "BLOCKED", "failing": [6]}]}}
+ "expected": {
+  "left_paid_paise": 19200,
+  "right_paid_paise": 9600,
+  "right": [
+   {
+    "outcome": "ALLOWED",
+    "failing": []
+   },
+   {
+    "outcome": "BLOCKED",
+    "failing": [
+     6
+    ]
+   }
+  ]
+ },
+ "llm": {
+  "start_url": "freshcart.in/product/FC-MILK-AMUL-500",
+  "post": [
+   "replay_last"
+  ]
+ }
+}
