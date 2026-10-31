@@ -146,7 +146,8 @@ export default function MissionControl() {
             THE AGENT <span className="text-[0.6em] font-medium tracking-normal text-muted">one brain, both wallets</span>
           </h2>
           <div className="flex min-h-0 basis-[32%] flex-col"><ThoughtStream lines={state.lines} /></div>
-          <ShopView url={state.shop.url} merchant={state.shop.merchant} injections={state.shop.injections} xray={xray} onToggle={() => setXray((v) => !v)} onTrace={() => setTraceOpen(true)} />
+          <ShopView url={state.shop.url} merchant={state.shop.merchant} injections={state.shop.injections} xray={xray} onToggle={() => setXray((v) => !v)} onTrace={() => setTraceOpen(true)}
+            traceReady={!!trace && trace.culprit !== null && trace.right.outcome !== "ALLOWED" && !traceOpen} />
           <div ref={cartRef} className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3">
             <span className="font-semibold text-white">Cart</span>
             {state.cart ? (

@@ -4,13 +4,14 @@ import { applyXray } from "./xray";
 
 const PAGE_W = 1100; // shop pages are laid out for desktop; scale them into the column
 
-export function ShopView({ url, merchant, injections, xray, onToggle, onTrace }: {
+export function ShopView({ url, merchant, injections, xray, onToggle, onTrace, traceReady }: {
   url: string | null;
   merchant?: string;
   injections: { style: string; label: string }[];
   xray: boolean;
   onToggle: () => void;
   onTrace?: () => void;
+  traceReady?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -40,8 +41,10 @@ export function ShopView({ url, merchant, injections, xray, onToggle, onTrace }:
           <span className="rounded-full border border-danger/60 px-2 text-[0.7em] text-danger">{injections.length} hidden</span>
         )}
         {onTrace && (
-          <button onClick={onTrace} className="ml-auto rounded-full border border-line px-3 py-0.5 font-mono text-[0.75em] font-bold tracking-wider text-muted hover:text-white">
-            TRACE (A)
+          <button onClick={onTrace} title="How this attack worked"
+            className={`ml-auto rounded-full border px-3 py-0.5 font-mono text-[0.75em] font-bold tracking-wider ${
+              traceReady ? "animate-pulse border-danger bg-danger/20 text-danger" : "border-line text-muted hover:text-white"}`}>
+            {traceReady ? "▶ ATTACK TRACE (A)" : "TRACE (A)"}
           </button>
         )}
         <button
