@@ -19,6 +19,12 @@ def model_name() -> str:
     return os.environ.get("LEASH_MODEL", "qwen2.5:3b")
 
 
+def seed() -> int:
+    """LEASH_SEED picks the model's sampling seed. 7 (default) = temperature 0, fully deterministic;
+    other seeds add a little temperature so `make golden` can retry a scenario that went off-script."""
+    return int(os.environ.get("LEASH_SEED", "7"))
+
+
 def ollama_ready(timeout: float = 1.5) -> bool:
     try:
         tags = httpx.get(f"{ollama_url()}/api/tags", timeout=timeout).json()
@@ -49,7 +55,7 @@ def run_llm(task: str, start_url: str, tools: Tools, hardened: bool = False,
         t0 = time.perf_counter()
         r = client.post(f"{ollama_url()}/api/chat", json={
             "model": model_name(), "messages": messages, "tools": prompts.TOOLS, "stream": False,
-            "options": {"temperature": 0, "seed": 7}, "keep_alive": "30m"})
+            "options": {"temperature": 0 if seed() == 7 else 0.4, "seed": seed()}, "keep_alive": "30m"})
         r.raise_for_status()
         msg = r.json()["message"]
         llm_ms = int((time.perf_counter() - t0) * 1000)

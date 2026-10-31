@@ -7,7 +7,7 @@ endif
 # Any Python 3.11+ works; prefer the newest found.
 SYSPY := $(shell for p in python3.13 python3.12 python3.11 python3; do command -v $$p >/dev/null && $$p -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null && echo $$p && break; done)
 
-.PHONY: setup keys dev test scenario demo-check reset web web-build demo record golden eval chart
+.PHONY: setup keys dev test scenario demo-check reset web web-build demo record golden eval chart doctor bench
 
 setup:
 	@test -n "$(SYSPY)" || (echo "Need Python 3.11+ (python.org or brew install python)"; exit 1)
@@ -49,7 +49,15 @@ record:
 	$(PY) -m agent.runner $(S) --mode live $(if $(PROMOTE),--promote,)
 
 golden:
-	for s in S0 S1 S2 S3 S4 S5; do $(PY) -m agent.runner $$s --mode live --promote; done
+	$(PY) -m scripts.golden $(if $(LOOSE),--loose,)
+
+# Is this laptop ready? (Python, Node, Ollama, model, ports, keys, disk, power, golden traces)
+doctor:
+	$(PY) -m scripts.doctor
+
+# How fast is the model at one tool-calling step, and does it fall for the hidden "buy 40"?
+bench:
+	$(PY) -m scripts.bench
 
 # Eval: LIVE (all 4 defences) if Ollama is up, else SCRIPTED (3 defences). Needs services running (`make dev`).
 eval:
