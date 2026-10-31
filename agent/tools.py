@@ -141,6 +141,7 @@ class Tools:
         r = self.http.post(f"{url('hub')}/route", json=req)
         r.raise_for_status()
         routed = r.json()
+        routed["request"] = req  # keep what was asked for, so the eval can judge it
         self.routes.append(routed)
         return routed
 

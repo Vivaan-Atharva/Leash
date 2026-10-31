@@ -87,6 +87,6 @@ EVENT_TYPES = {
     "agent.thought", "agent.tool_call", "agent.tool_result", "shop.page_viewed",
     "request.created", "gateway.check", "gateway.decision", "rail.debit", "rail.balance",
     "mandate.signed", "mandate.revoked", "stepup.requested", "stepup.resolved",
-    "log.appended", "log.tampered", "director.moment", "system.mode", "score.update",
+    "log.appended", "log.tampered", "director.moment", "system.mode", "score.update", "eval.row", "eval.status",
 }
 LANES = {"left", "right", "both", "system"}

@@ -3,7 +3,7 @@ S ?= all
 # Any Python 3.11+ works; prefer the newest found.
 SYSPY := $(shell for p in python3.13 python3.12 python3.11 python3; do command -v $$p >/dev/null && $$p -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null && echo $$p && break; done)
 
-.PHONY: setup keys dev test scenario demo-check reset web web-build demo record golden
+.PHONY: setup keys dev test scenario demo-check reset web web-build demo record golden eval chart
 
 setup:
 	@test -n "$(SYSPY)" || (echo "Need Python 3.11+ (python.org or brew install python)"; exit 1)
@@ -46,3 +46,10 @@ record:
 
 golden:
 	for s in S0 S1 S2 S3 S4 S5; do $(PY) -m agent.runner $$s --mode live --promote; done
+
+# Eval: LIVE (all 4 defences) if Ollama is up, else SCRIPTED (3 defences). Needs services running (`make dev`).
+eval:
+	$(PY) -m eval.harness $(if $(MODE),--mode $(MODE),) $(if $(RUNS),--runs $(RUNS),)
+
+chart:
+	$(PY) -m eval.chart

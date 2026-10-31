@@ -378,6 +378,14 @@ def _timeout_stepup(decision_id: str) -> None:
         pass  # already resolved on the phone
 
 
+# Declared before /stepup/{decision_id} so "config" isn't read as a decision id.
+@app.post("/stepup/config")
+def stepup_config(body: dict = Body(...)):
+    with store.connect() as conn:
+        store.kv_set(conn, "stepup", bool(body.get("enabled", True)))
+        return {"enabled": store.kv_get(conn, "stepup", True)}
+
+
 @app.post("/stepup/{decision_id}")
 def stepup(decision_id: str, body: dict = Body(...)):
     """Body: {decision_id, approve: bool, ts, signature} signed by the mandate's phone key."""
@@ -398,13 +406,6 @@ def stepup_pending():
     with store.connect() as conn:
         rows = conn.execute("SELECT decision_id, amount_paise, expires_at FROM stepups WHERE status='PENDING'")
         return {"pending": [{"decision_id": d, "amount_paise": a, "expires_at": e} for d, a, e in rows]}
-
-
-@app.post("/stepup/config")
-def stepup_config(body: dict = Body(...)):
-    with store.connect() as conn:
-        store.kv_set(conn, "stepup", bool(body.get("enabled", True)))
-        return {"enabled": store.kv_get(conn, "stepup", True)}
 
 
 @app.get("/decisions/{decision_id}")

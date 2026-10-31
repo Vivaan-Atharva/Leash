@@ -83,3 +83,8 @@ def test_report_for_blocked_attack(stack):
     rep = http.get(f"{url('gateway')}/report/{did}").json()
     assert rep["chain"]["ok"] is False and rep["chain"]["broken_at"] == 1
     http.post(f"{url('gateway')}/demo/restore")
+
+
+def test_stepup_config_route_is_not_a_decision_id(stack):
+    r = httpx.post(f"{url('gateway')}/stepup/config", json={"enabled": False})
+    assert r.status_code == 200 and r.json() == {"enabled": False}

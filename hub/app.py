@@ -360,3 +360,31 @@ async def netinfo():
     host = os.environ.get("LEASH_PUBLIC_HOST") or (ips[0] if ips else "127.0.0.1")
     web_port = os.environ.get("LEASH_WEB_PORT", "3000")
     return {"ips": ips, "host": host, "phone_url": f"http://{host}:{web_port}/phone"}
+
+
+# ------------------------------------------------------------------ eval (results screen)
+EVAL = {"proc": None}
+
+
+@app.get("/eval/results")
+async def eval_results():
+    from eval.summary import summarise
+    s = summarise()
+    if s.get("available"):
+        s["running"] = EVAL["proc"] is not None and EVAL["proc"].returncode is None
+    return s
+
+
+@app.post("/eval/run")
+async def eval_run(body: dict = Body(default={})):
+    """Run the suite in the background (LIVE if Ollama is up). Rows stream as eval.row events."""
+    if (EVAL["proc"] is not None and EVAL["proc"].returncode is None) or _busy():
+        return {"ok": False, "busy": True}
+    args = ["--runs", str(int(body.get("runs", 3)))]
+    if body.get("mode") in ("live", "scripted"):
+        args += ["--mode", body["mode"]]
+    EVAL["proc"] = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "eval.harness", *args, cwd=str(ROOT), env=os.environ.copy(),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    asyncio.create_task(EVAL["proc"].wait())
+    return {"ok": True}

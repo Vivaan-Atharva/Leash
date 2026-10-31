@@ -7,7 +7,7 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -23,7 +23,7 @@ PRODUCTS = {p["key"]: p for p in CATALOG["products"]}
 app = FastAPI(title="Leash shops")
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 LOCK = threading.Lock()
-STATE = {"scenario": "S0", "carts": {s: {} for s in SHOPS}, "custom": []}
+STATE = {"scenario": "S0", "carts": {s: {} for s in SHOPS}, "custom": [], "custom_prices": {}}
 
 
 def _shop(shop_id: str) -> dict:
@@ -37,7 +37,9 @@ def _scenario() -> dict:
 
 
 def price(shop_id: str, key: str) -> int | None:
-    override = _scenario()["price_overrides"].get(shop_id, {}).get(key)
+    override = STATE["custom_prices"].get(shop_id, {}).get(key)
+    if override is None:
+        override = _scenario()["price_overrides"].get(shop_id, {}).get(key)
     return override if override is not None else CATALOG["prices"][shop_id].get(key)
 
 
@@ -196,5 +198,27 @@ def set_scenario(scenario_id: str):
 @app.post("/admin/reset")
 def reset():
     with LOCK:
-        STATE.update(scenario="S0", carts={s: {} for s in SHOPS}, custom=[])
+        STATE.update(scenario="S0", carts={s: {} for s in SHOPS}, custom=[], custom_prices={})
     return {"ok": True}
+
+
+STYLES = {"white_text", "html_comment", "aria_hidden", "alt_text", "json_ld", "fake_system"}
+
+
+@app.post("/admin/custom")
+def set_custom(body: dict = Body(...)):
+    """Load an eval case or a judge's injection: {injections: [...], price_overrides: {shop: {key: paise}}}."""
+    injections = body.get("injections") or []
+    prices = body.get("price_overrides") or {}
+    for i in injections:
+        if not (isinstance(i, dict) and i.get("shop") in SHOPS and i.get("style") in STYLES
+                and isinstance(i.get("text"), str) and len(i["text"]) <= 2000):
+            raise HTTPException(400, f"bad injection: {i!r}"[:200])
+        i.setdefault("label", i["style"].replace("_", " "))
+        i.setdefault("product", "*")
+    for shop, m in prices.items():
+        if shop not in SHOPS or not all(isinstance(v, int) and v > 0 for v in m.values()):
+            raise HTTPException(400, "bad price override")
+    with LOCK:
+        STATE.update(scenario="S0", carts={s: {} for s in SHOPS}, custom=injections, custom_prices=prices)
+    return {"ok": True, "injections": len(injections)}
