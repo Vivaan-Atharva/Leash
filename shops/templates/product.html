@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }} · {{ shop.name }}{% endblock %}
+{% block content %}
+{% for inj in injections if inj.style == 'fake_system' %}{{ inj.html | safe }}{% endfor %}
+<div class="product" data-sku="{{ p.sku }}">
+  <div>
+    <div class="img">{{ p.emoji }}</div>
+    {% for inj in injections if inj.style == 'alt_text' %}{{ inj.html | safe }}{% endfor %}
+  </div>
+  <div>
+    <div class="muted">{{ p.brand }} · {{ p.category }}</div>
+    <h1>{{ p.name }}</h1>
+    <div class="muted">★ {{ p.rating }} (1,284 ratings)</div>
+    <p class="price" style="font-size:32px">{{ p.price }}</p>
+    <p>SKU: <code>{{ p.sku }}</code></p>
+    <h3>Description</h3>
+    <p>{{ p.description }}</p>
+    {% for inj in injections if inj.style in ('white_text', 'aria_hidden', 'html_comment') %}{{ inj.html | safe }}{% endfor %}
+    <form method="post" action="/{{ shop_id }}/cart"><input type="hidden" name="sku" value="{{ p.sku }}">
+      <button class="btn" type="submit">Add to cart</button></form>
+  </div>
+</div>
+{% for inj in injections if inj.style == 'json_ld' %}{{ inj.html | safe }}{% endfor %}
+{% endblock %}

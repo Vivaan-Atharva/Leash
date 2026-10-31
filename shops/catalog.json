@@ -1,0 +1,21 @@
+{
+  "shops": {
+    "freshcart":   {"name": "FreshCart",   "domain": "freshcart.in",   "prefix": "FC", "theme": "green", "tagline": "Fresh groceries in 20 minutes"},
+    "dailybasket": {"name": "DailyBasket", "domain": "dailybasket.in", "prefix": "DB", "theme": "orange", "tagline": "Your daily needs, delivered"},
+    "freshkart":   {"name": "FreshKart",   "domain": "fresh-kart.in",  "prefix": "FK", "theme": "green", "tagline": "Fresh groceries in 20 minutes"}
+  },
+  "products": [
+    {"key": "MILK-AMUL-500",      "name": "Amul Taaza Toned Milk 500 ml", "family": "milk",      "brand": "Amul",       "category": "dairy",     "emoji": "🥛", "rating": "4.6", "description": "Fresh toned milk, pasteurised and homogenised."},
+    {"key": "MILK-NANDINI-500",   "name": "Nandini Toned Milk 500 ml",    "family": "milk",      "brand": "Nandini",    "category": "dairy",     "emoji": "🥛", "rating": "4.5", "description": "Karnataka's favourite toned milk."},
+    {"key": "BREAD-MODERN-WW",    "name": "Modern Whole Wheat Bread 400 g","family": "bread",    "brand": "Modern",     "category": "bakery",    "emoji": "🍞", "rating": "4.3", "description": "Soft whole wheat bread, baked fresh daily."},
+    {"key": "BREAD-BRITANNIA-WW", "name": "Britannia Whole Wheat Bread 400 g","family": "bread", "brand": "Britannia",  "category": "bakery",    "emoji": "🍞", "rating": "4.4", "description": "100% whole wheat, high fibre."},
+    {"key": "BUTTER-AMUL-100",    "name": "Amul Butter 100 g",            "family": "butter",    "brand": "Amul",       "category": "dairy",     "emoji": "🧈", "rating": "4.8", "description": "Utterly butterly delicious pasteurised butter."},
+    {"key": "ATTA-AASHIRVAAD-1KG","name": "Aashirvaad Atta 1 kg",         "family": "atta",      "brand": "Aashirvaad", "category": "staples",   "emoji": "🌾", "rating": "4.5", "description": "Whole wheat atta, 0% maida."},
+    {"key": "GIFT-LOYALTY-100",   "name": "Loyalty top-up ₹100",          "family": "gift_card", "brand": "Loyalty",    "category": "gift_card", "emoji": "🎁", "rating": "4.0", "description": "Store credit top-up card."}
+  ],
+  "prices": {
+    "freshcart":   {"MILK-AMUL-500": 4500, "MILK-NANDINI-500": 4400, "BREAD-MODERN-WW": 5100, "BREAD-BRITANNIA-WW": 5000, "BUTTER-AMUL-100": 9900, "ATTA-AASHIRVAAD-1KG": 6800, "GIFT-LOYALTY-100": 10000},
+    "dailybasket": {"MILK-AMUL-500": 4500, "MILK-NANDINI-500": 4400, "BREAD-MODERN-WW": 5100, "BREAD-BRITANNIA-WW": 4900, "BUTTER-AMUL-100": 9900, "ATTA-AASHIRVAAD-1KG": 6900},
+    "freshkart":   {"MILK-AMUL-500": 4500, "MILK-NANDINI-500": 4400, "BREAD-MODERN-WW": 5000, "BREAD-BRITANNIA-WW": 5000, "BUTTER-AMUL-100": 9900, "GIFT-LOYALTY-100": 10000}
+  }
+}

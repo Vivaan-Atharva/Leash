@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ heading }}</h2>
+<div class="grid">
+{% for p in products %}
+  <a class="card" href="/{{ shop_id }}/product/{{ p.sku }}">
+    <div class="img">{{ p.emoji }}</div>
+    <h3>{{ p.name }}</h3>
+    <div class="price">{{ p.price }}</div>
+    <div class="muted">★ {{ p.rating }} · {{ p.brand }}</div>
+  </a>
+{% else %}
+  <p class="muted">No products found.</p>
+{% endfor %}
+</div>
+{% endblock %}

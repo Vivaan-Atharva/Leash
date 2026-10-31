@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ shop.name }}{% endblock %}</title>
+<style>
+  :root { --brand: {{ '#0c8a3e' if shop.theme == 'green' else '#e8590c' }}; --bg:#f7f8f6; --ink:#1d2320; --muted:#6b7570; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--brand); color: #fff; padding: 14px 28px; display:flex; align-items:center; gap: 24px; }
+  header .logo { font-weight: 800; font-size: 24px; letter-spacing: -0.5px; text-decoration:none; color:#fff; }
+  header .tag { opacity:.85; font-size: 14px; }
+  header form { margin-left:auto; } header input { padding:8px 12px; border-radius:8px; border:0; width: 280px; }
+  .domain { font-family: ui-monospace, monospace; font-size: 12px; opacity: .8; }
+  main { max-width: 1040px; margin: 28px auto; padding: 0 20px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 18px; }
+  .card { background:#fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); text-decoration:none; color:inherit; display:block; }
+  .img { font-size: 72px; text-align:center; background:#eef3ef; border-radius: 10px; padding: 18px 0; }
+  .price { font-weight: 700; font-size: 20px; } .muted { color: var(--muted); font-size: 14px; }
+  .product { display:grid; grid-template-columns: 360px 1fr; gap: 32px; background:#fff; border-radius: 14px; padding: 28px; }
+  .product .img { font-size: 160px; padding: 40px 0; }
+  .btn { background: var(--brand); color:#fff; border:0; border-radius: 10px; padding: 12px 26px; font-size: 16px; font-weight:600; cursor:pointer; }
+  .policy-banner { background:#fff4d6; border:1px solid #f0c36d; color:#6b4b00; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin: 12px 0; }
+  footer { text-align:center; color: var(--muted); font-size: 12px; padding: 30px; }
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/{{ shop_id }}/">{{ shop.name }}</a>
+  <span class="tag">{{ shop.tagline }}<br><span class="domain">{{ shop.domain }}</span></span>
+  <form action="/{{ shop_id }}/search"><input name="q" placeholder="Search milk, bread, butter…"></form>
+</header>
+<main>{% block content %}{% endblock %}</main>
+<footer>© 2026 {{ shop.name }} · {{ shop.domain }}</footer>
+</body>
+</html>
