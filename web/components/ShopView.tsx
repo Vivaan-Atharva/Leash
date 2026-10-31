@@ -4,12 +4,13 @@ import { applyXray } from "./xray";
 
 const PAGE_W = 1100; // shop pages are laid out for desktop; scale them into the column
 
-export function ShopView({ url, merchant, injections, xray, onToggle }: {
+export function ShopView({ url, merchant, injections, xray, onToggle, onTrace }: {
   url: string | null;
   merchant?: string;
   injections: { style: string; label: string }[];
   xray: boolean;
   onToggle: () => void;
+  onTrace?: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -38,9 +39,14 @@ export function ShopView({ url, merchant, injections, xray, onToggle }: {
         {injections.length > 0 && !xray && (
           <span className="rounded-full border border-danger/60 px-2 text-[0.7em] text-danger">{injections.length} hidden</span>
         )}
+        {onTrace && (
+          <button onClick={onTrace} className="ml-auto rounded-full border border-line px-3 py-0.5 font-mono text-[0.75em] font-bold tracking-wider text-muted hover:text-white">
+            TRACE (A)
+          </button>
+        )}
         <button
           onClick={onToggle}
-          className={`ml-auto rounded-full border px-3 py-0.5 font-mono text-[0.75em] font-bold tracking-wider transition ${
+          className={`${onTrace ? "" : "ml-auto "} rounded-full border px-3 py-0.5 font-mono text-[0.75em] font-bold tracking-wider transition ${
             xray ? "border-danger bg-danger text-white glow-danger" : "border-line text-muted hover:text-white"
           }`}
         >

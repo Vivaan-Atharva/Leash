@@ -44,6 +44,30 @@ export type Director = {
   task?: string;
 };
 
+export type Prov = {
+  label: "trusted" | "untrusted" | "unsourced";
+  how: string;
+  hidden: boolean;
+  url: string | null;
+  excerpt: { before: string; match: string; after: string } | null;
+};
+export type TraceField = { path: string; field: string; value: unknown; display: string; checks: number[]; prov: Prov };
+export type AttackTrace = {
+  request_id: string;
+  scenario: string | null;
+  page: { url: string; merchant: string; segments: { id: number; text: string; hidden: string | null }[] } | null;
+  task: string | null;
+  fields: TraceField[];
+  source: { id: number; text: string; hidden: string | null; url: string | null; trusted: boolean } | null;
+  culprit: number | null;
+  thought: string | null;
+  call: { tool: string; args: Record<string, unknown> } | null;
+  total: number;
+  left: { amount_paise: number; paid: boolean };
+  right: { outcome: string; failing: number[]; decision_id: string | null; checks: Check[]; amount_paise: number };
+};
+export type Counterfactual = { scenario: string; status: string; mode?: string; for_request_id?: string; traces?: AttackTrace[] };
+
 export type State = {
   connected: boolean;
   mode: string; // what the hub will use for the next run: LIVE | REPLAY
@@ -64,6 +88,9 @@ export type State = {
   revokeSeq: number | null;
   director: Director;
   resetSeq: number;
+  traces: AttackTrace[];
+  counterfactuals: Record<string, Counterfactual>;
+  cfRunning: string | null;
 };
 
 const initial: State = {
@@ -86,6 +113,9 @@ const initial: State = {
   revokeSeq: null,
   director: { index: -1, moment: null, status: null },
   resetSeq: 0,
+  traces: [],
+  counterfactuals: {},
+  cfRunning: null,
 };
 
 type Action =
@@ -172,6 +202,12 @@ function reduce(s: State, a: Action): State {
     case "log.appended":
       if (s.chain.some((c) => c.index === d.index)) return s;
       return { ...s, chain: [...s.chain, { index: d.index, type: d.type, hash: d.hash }].slice(-40) };
+    case "attack.trace":
+      return { ...s, traces: [...s.traces.filter((t) => t.request_id !== d.request_id), d as AttackTrace].slice(-30) };
+    case "attack.counterfactual":
+      if (d.status === "done" && d.for_request_id)
+        return { ...s, cfRunning: null, counterfactuals: { ...s.counterfactuals, [d.for_request_id]: d as Counterfactual } };
+      return { ...s, cfRunning: d.status === "running" ? d.scenario : null };
     case "log.tampered":
       return { ...s, tampered: !!d.tampered, verify: { ok: d.ok, broken_at: d.broken_at, length: d.length } };
     default:

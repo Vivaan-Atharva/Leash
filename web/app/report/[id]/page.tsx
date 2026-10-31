@@ -41,10 +41,16 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   const [r, setR] = useState<Report | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [embed, setEmbed] = useState(false);
+  const [trace, setTrace] = useState<any>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   useEffect(() => {
     setEmbed(new URLSearchParams(window.location.search).has("embed"));
-    getJSON(api.gateway(`/report/${id}`)).then(setR).catch((e) => setErr(String(e)));
+    getJSON(api.gateway(`/report/${id}`))
+      .then((rep) => {
+        setR(rep);
+        return getJSON(api.hub(`/trace/${rep.decision.request_id}`)).then(setTrace).catch(() => {});
+      })
+      .catch((e) => setErr(String(e)));
   }, [id]);
 
   if (err) return <main className="p-10 text-danger">Couldn&apos;t load report: {err}</main>;
@@ -107,6 +113,22 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
           <Row k="Created" v={time(q.created_at)} />
         </Section>
       </div>
+
+      {trace?.trace && trace.trace.culprit !== null && (() => {
+        const t = trace.trace, f = t.fields[t.culprit], p = f.prov;
+        const cft = trace.counterfactual?.traces?.[trace.counterfactual.traces.length - 1];
+        const cff = cft?.fields.find((x: any) => x.path === f.path) ?? cft?.fields.find((x: any) => x.field === f.field); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const show = (x: any) => (x.field === "price" ? inr(Number(x.value)) : x.field === "qty" ? `×${x.value}` : String(x.value)); // eslint-disable-line @typescript-eslint/no-explicit-any
+        return (
+          <Section title="Root cause (agent trace)" right={<span className="text-xs text-muted">explanation only · not used for the decision</span>}>
+            <Row k="Tainted field" v={<span className="font-mono">{f.path} = <b className="text-danger">{show(f)}</b></span>} />
+            <Row k="Came from" v={<>{p.label === "trusted" ? "Asha's task (trusted)" : `${p.how} on ${p.url ?? "the shop page"} (untrusted)`}</>} />
+            {p.excerpt && <Row k="Text" v={<span className="font-mono text-sm">…{p.excerpt.before.slice(-80)}<mark className="rounded bg-danger px-1 text-white">{p.excerpt.match}</mark>{p.excerpt.after.slice(0, 80)}…</span>} />}
+            {t.thought && <Row k="Agent's reasoning" v={<i>&ldquo;{t.thought}&rdquo;</i>} />}
+            {cft && <Row k="Counterfactual" v={<>Same agent and task on the clean page: {cff ? <b>{show(cff)}</b> : null} · {inr(cft.total)} · Leash would say <b>{cft.right.outcome}</b>.{cff && String(cff.value) !== String(f.value) && <> The injection turned <b className="text-success">{show(cff)}</b> into <b className="text-danger">{show(f)}</b>.</>}</>} />}
+          </Section>
+        );
+      })()}
 
       <Section title="Six checks" right={<span className="font-mono text-sm text-muted">profile {d.profile} · decided in {(d.decided_in_us / 1000).toFixed(1)} ms</span>}>
         <table className="w-full text-left">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AttackTraceOverlay } from "@/components/AttackTrace";
 import { ChainBar } from "@/components/ChainBar";
 import { LeftLane, RightLane } from "@/components/Lanes";
 import { DirectorBanner, ReportOverlay, Totals } from "@/components/Overlays";
@@ -26,6 +27,7 @@ export default function MissionControl() {
   const [totalsOpen, setTotalsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
@@ -96,12 +98,14 @@ export default function MissionControl() {
         e.preventDefault();
         setTotalsOpen(false);
         setReportId(null);
+        setTraceOpen(false);
         director("/director/next");
       } else if (k === "ArrowLeft" || k === "PageUp") {
         e.preventDefault();
         director("/director/prev");
       } else if (/^[0-9]$/.test(k)) director(`/director/scenario/S${k}`);
       else if (k === "x" || k === "X") setXray((v) => !v);
+      else if (k === "a" || k === "A") setTraceOpen((v) => !v);
       else if (k === "t" || k === "T") tamper();
       else if (k === "r" || k === "R") reset();
       else if (k === "l" || k === "L") toggleMode();
@@ -111,12 +115,16 @@ export default function MissionControl() {
       } else if (k === "Escape") {
         setTotalsOpen(false);
         setReportId(null);
+        setTraceOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [director, tamper, reset, toggleMode]);
 
+  // The trace to show: the newest request that has a culprit (an attack), else the newest one.
+  const trace = [...state.traces].reverse().find((t) => t.culprit !== null) ?? state.traces[state.traces.length - 1] ?? null;
+  const cf = trace ? state.counterfactuals[trace.request_id] ?? null : null;
   const d = state.director;
   const label = d.moment ? `${d.index >= 0 ? `${d.index + 1}/${(d as { of?: number }).of ?? 9} · ` : ""}${d.moment} ${MOMENT_NAMES[d.moment] ?? ""}` : null;
   const revoked = state.mandate?.status === "REVOKED";
@@ -133,7 +141,7 @@ export default function MissionControl() {
             THE AGENT <span className="text-[0.6em] font-medium tracking-normal text-muted">one brain, both wallets</span>
           </h2>
           <div className="flex min-h-0 basis-[32%] flex-col"><ThoughtStream lines={state.lines} /></div>
-          <ShopView url={state.shop.url} merchant={state.shop.merchant} injections={state.shop.injections} xray={xray} onToggle={() => setXray((v) => !v)} />
+          <ShopView url={state.shop.url} merchant={state.shop.merchant} injections={state.shop.injections} xray={xray} onToggle={() => setXray((v) => !v)} onTrace={() => setTraceOpen(true)} />
           <div ref={cartRef} className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3">
             <span className="font-semibold text-white">Cart</span>
             {state.cart ? (
@@ -163,6 +171,7 @@ export default function MissionControl() {
       <Packet id={state.packet ? `${state.packet.id}-${state.packet.seq}` : null} root={root} from={cartRef} left={leftRef} right={rightRef} />
       <DirectorBanner director={d} revoked={revoked} />
       <Totals open={totalsOpen} left={state.score.left_lost_paise} right={state.score.right_lost_paise} onClose={() => setTotalsOpen(false)} />
+      <AttackTraceOverlay open={traceOpen} trace={trace} cf={cf} cfRunning={!!state.cfRunning} onClose={() => setTraceOpen(false)} />
       <ReportOverlay id={reportId} onClose={() => setReportId(null)} />
       {toast && <div className="absolute bottom-24 right-6 z-50 rounded-lg border border-line bg-surface px-4 py-2">{toast}</div>}
     </div>
