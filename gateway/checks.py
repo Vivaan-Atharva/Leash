@@ -230,3 +230,27 @@ def run_checks(profile: str, req: PaymentRequest | None, m: Mandate | None,
 
 def outcome(results: list[CheckResult]) -> str:
     return "ALLOWED" if all(r.passed for r in results) else "BLOCKED"
+
+
+# ---------------------------------------------------------------- step-up (Phase 3)
+def step_up_reason(req: PaymentRequest, m: Mandate, s: State, known_brands: frozenset) -> str | None:
+    """After all six pass: should Asha approve this on her phone first?
+
+    known_brands: (family, brand) pairs Asha already buys: the first brand of each mandate item
+    (her usual) plus every brand bought under this mandate.
+    """
+    reasons = []
+    if m.step_up.new_brand:
+        for it in req.cart:
+            ref = _ref(s, it.sku)
+            if ref and (ref["family"], ref["brand"]) not in known_brands:
+                reasons.append(f"new brand: {ref['brand']} {ref['family']}")
+    total = order_total_paise(req, s)
+    threshold = m.limits.per_order_paise * m.step_up.order_over_pct_of_cap // 100
+    if total > threshold:
+        reasons.append(f"{inr(total)} is over {m.step_up.order_over_pct_of_cap}% of the per-order cap")
+    return "; ".join(dict.fromkeys(reasons)) or None
+
+
+def usual_brands(m: Mandate) -> set[tuple[str, str]]:
+    return {(i.family, i.brands[0]) for i in m.intent.items if i.brands}

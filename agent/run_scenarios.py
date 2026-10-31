@@ -41,6 +41,12 @@ def phone_revoke(http: httpx.Client, agent: ScriptedAgent) -> dict:
     return {"right": right, "left": left}
 
 
+def phone_approve(http: httpx.Client, decision_id: str, approve: bool = True) -> dict:
+    """What Asha's phone does on a step-up card (seed phone key)."""
+    body = sign_obj({"decision_id": decision_id, "approve": approve, "ts": now_iso()}, signing_key("phone"))
+    return http.post(f"{url('gateway')}/stepup/{decision_id}", json=body).json()
+
+
 def run_one(sc: dict, agent: ScriptedAgent, http: httpx.Client, announce: bool = True) -> dict:
     if announce:
         http.post(f"{url('shops')}/admin/scenario/{sc['id']}").raise_for_status()
@@ -63,6 +69,8 @@ def run_one(sc: dict, agent: ScriptedAgent, http: httpx.Client, announce: bool =
             routes.append(agent.send(agent.last_request))
         elif do == "revoke":
             phone_revoke(http, agent)
+        elif do == "approve":
+            phone_approve(http, routes[-1]["right"]["decision"]["decision_id"], step.get("approve", True))
         else:
             raise ValueError(f"unknown step {do}")
     return evaluate(sc, routes)

@@ -32,8 +32,12 @@ ACTIVE = {"scenario": None, "name": None, "attack": False, "mode": None}
 SCORE = {"left_paid_paise": 0, "right_paid_paise": 0, "left_lost_paise": 0, "right_lost_paise": 0}
 
 # Director moments (spec §6.4): → walks this list.
-MOMENTS = ["S0", "S1", "S2", "S3", "S4", "REVOKE", "S5", "TOTALS"]
-DIRECTOR = {"index": -1, "proc": None}
+PLAYLISTS = {
+    "stage": ["S0", "S1", "S2", "S3", "S4", "REVOKE", "S5", "TOTALS", "REPORT"],
+    "table": ["S1", "RESULTS"],  # the 60-second table demo
+}
+MOMENTS = list(PLAYLISTS["stage"])
+DIRECTOR = {"index": -1, "proc": None, "blocked": [], "playlist": "stage"}
 
 
 async def publish(type_: str, lane: str, data: dict, ts: str | None = None) -> dict:
@@ -67,6 +71,13 @@ async def post_events(body: dict | list = Body(...)):
             continue
         await publish(e["type"], e["lane"], e.get("data") or {}, e.get("ts"))
         n += 1
+        if e["type"] == "gateway.decision" and e["data"].get("outcome") in ("BLOCKED", "HELD"):
+            DIRECTOR["blocked"].append({"decision_id": e["data"]["decision_id"],
+                                        "scenario": ACTIVE["scenario"], "outcome": e["data"]["outcome"]})
+        if e["type"] == "stepup.resolved" and e["data"].get("outcome") == "ALLOWED":
+            # Asha approved it on her phone: money moved, but with her consent, so it isn't "lost".
+            SCORE["right_paid_paise"] += e["data"].get("amount_paise", 0)
+            await publish("score.update", "system", _score())
     return {"accepted": n}
 
 
@@ -161,6 +172,10 @@ async def demo_reset():
                 out[name] = r.status_code == 200
             except httpx.HTTPError:
                 out[name] = False
+    p = DIRECTOR["proc"]
+    if p is not None and p.returncode is None:
+        p.terminate()  # a run from before the reset must not keep paying
+    DIRECTOR["blocked"] = []
     EVENTS.clear()
     for k in SCORE:
         SCORE[k] = 0
@@ -213,7 +228,7 @@ async def preflight():
         bal = {k: v.get("balance_paise") for k, v in w.items()}
         add("both wallets at ₹5,000", bal == {"L": 500000, "R": 500000},
             ", ".join(f"{k} {inr(v)}" for k, v in sorted(bal.items()) if isinstance(v, int)))
-        golden = [sid for sid in MOMENTS if sid.startswith("S")
+        golden = [sid for sid in PLAYLISTS["stage"] if sid.startswith("S")
                   and not (traces_dir() / "golden" / f"{sid}.json").exists()]
         add("golden traces S0–S5", not golden,
             "all present" if not golden else f"missing {', '.join(golden)} (REPLAY falls back to SCRIPTED)",
@@ -271,13 +286,34 @@ async def _trigger(index: int) -> dict:
     if m == "TOTALS":
         await publish("director.moment", "system", {**base, "status": "totals", **_score()})
         return {"ok": True, **base}
+    if m == "REPORT":
+        # The report for the first blocked attack of the run (S1's 40 packs on the stage).
+        pick = next((b for b in DIRECTOR["blocked"] if b["outcome"] == "BLOCKED"), None)
+        await publish("director.moment", "system", {**base, "status": "report",
+                                                    "decision_id": pick and pick["decision_id"]})
+        return {"ok": True, **base}
+    if m == "RESULTS":
+        await publish("director.moment", "system", {**base, "status": "results"})
+        return {"ok": True, **base}
     await publish("director.moment", "system", {**base, "scenario": m, "status": "starting"})
     return {**(await _run_scenario(m)), **base}
 
 
 @app.get("/director")
 async def director_state():
-    return {"index": DIRECTOR["index"], "moments": MOMENTS, "busy": _busy(), **_mode, "active": ACTIVE}
+    return {"index": DIRECTOR["index"], "moments": MOMENTS, "playlist": DIRECTOR["playlist"],
+            "busy": _busy(), **_mode, "active": ACTIVE}
+
+
+@app.post("/director/playlist/{name}")
+async def director_playlist(name: str):
+    if name not in PLAYLISTS:
+        return {"ok": False, "error": f"playlists: {sorted(PLAYLISTS)}"}
+    MOMENTS[:] = PLAYLISTS[name]
+    DIRECTOR.update(playlist=name, index=-1)
+    await publish("director.moment", "system", {"index": -1, "moment": None, "playlist": name,
+                                                "of": len(MOMENTS), "status": "playlist"})
+    return {"ok": True, "playlist": name, "moments": MOMENTS}
 
 
 @app.post("/director/next")

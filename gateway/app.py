@@ -6,16 +6,17 @@ import hashlib
 import json
 import threading
 import time
+from datetime import timedelta
 from typing import Literal
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException
 from pydantic import ValidationError
 
-from gateway import audit, catalog, checks, seed, store
+from gateway import audit, catalog, checks, report, seed, store
 from shared.canonical import canonical_json
 from shared.config import url
-from shared.crypto import sign_obj, verify_obj
+from shared.crypto import fingerprint, sign_obj, verify_obj
 from shared.events import emit
 from shared.keys import public_key, signing_key
 from shared.models import DECISION_UNSIGNED_FIELDS, Mandate, PaymentRequest
@@ -23,6 +24,21 @@ from shared.money import inr
 from shared.timeutil import iso, now_iso, utcnow
 
 app = FastAPI(title="Leash gateway")
+
+
+@app.on_event("startup")
+def _warm() -> None:
+    """Load the catalogue and run one throwaway check pass so the first real decision is fast."""
+    from shared.models import PaymentRequest as _PR  # noqa: F401
+    catalog.load()
+    try:
+        m = Mandate.model_validate(seed.seed_mandate())
+        st = checks.State(now=utcnow(), registered_agents=frozenset(), revoked_at=None, nonce_seen=False,
+                          week_spent_paise=0, block_remaining_paise=0, catalog=catalog.load())
+        checks.run_checks("leash", None, m, st)
+        verify_obj(seed.seed_mandate(), m.user.phone_pubkey)
+    except Exception:  # warm-up only; never block startup
+        pass
 LOCK = threading.Lock()  # decisions are serialised: one state, one order
 _gw_key = None
 
@@ -199,6 +215,17 @@ def _settle(decision_id: str, req: PaymentRequest, block_id: str) -> str | None:
     return None
 
 
+STEP_UP_SECONDS = 60
+
+
+def _record_brands(conn, mandate_id: str, req: PaymentRequest) -> None:
+    ref = catalog.load()
+    for it in req.cart:
+        p = ref.get(catalog.product_key(it.sku))
+        if p:
+            conn.execute("INSERT OR IGNORE INTO brands VALUES (?,?,?)", (mandate_id, p["family"], p["brand"]))
+
+
 @app.post("/pay")
 def pay(raw: dict = Body(...)):
     t0 = time.perf_counter_ns()
@@ -220,11 +247,19 @@ def pay(raw: dict = Body(...)):
             nonce_seen=conn.execute("SELECT 1 FROM nonces WHERE nonce=?", (nonce,)).fetchone()
             is not None,
             week_spent_paise=store.week_spent(conn, mid),
-            block_remaining_paise=store.kv_get(conn, "block_amount", 0) - _all_spent(conn),
+            block_remaining_paise=store.kv_get(conn, "block_amount", 0) - store.all_committed(conn),
             catalog=catalog.load(),
         )
         results = checks.run_checks(profile, req, mandate, state)
         outcome = checks.outcome(results)
+        step_up = None
+        if outcome == "ALLOWED" and profile == "leash" and store.kv_get(conn, "stepup", True):
+            known = frozenset(checks.usual_brands(mandate) | store.known_brands(conn, mid))
+            reason = checks.step_up_reason(req, mandate, state, known)
+            if reason:
+                outcome = "HELD"
+                step_up = {"reason": reason,
+                           "expires_at": iso(state.now + timedelta(seconds=STEP_UP_SECONDS))}
         decided_in_us = (time.perf_counter_ns() - t0) // 1000
 
         # ---- record (outside the timed decision) ----
@@ -256,14 +291,21 @@ def pay(raw: dict = Body(...)):
             "decided_in_us": decided_in_us,
             "decided_at": now_iso(),
             "settlement_error": settlement_error,
+            "step_up": step_up,
         }
         decision = sign_obj(decision, gw_key(), field="gateway_signature")
         entry = _log(conn, "DECISION", decision)
         if outcome == "ALLOWED":
             conn.execute("INSERT INTO spend VALUES (?,?,?,?)",
                          (decision_id, mid, amount, now_iso()))
+            _record_brands(conn, mid, req)
             _log(conn, "DEBIT", {"decision_id": decision_id, "amount_paise": amount,
                                  "block_id": mandate.reserve_block_id, "merchant": req.merchant})
+        if outcome == "HELD":
+            conn.execute("INSERT INTO stepups VALUES (?,?,?,?,?,NULL)",
+                         (decision_id, mid, req.claimed_total_paise, "PENDING", step_up["expires_at"]))
+            _log(conn, "STEP_UP_REQUESTED", {"decision_id": decision_id, **step_up,
+                                             "amount_paise": req.claimed_total_paise})
         decision["log_index"] = entry["index"]
         decision["log_hash"] = entry["hash"]
         conn.execute("INSERT OR REPLACE INTO decisions VALUES (?,?,?,?)",
@@ -277,13 +319,92 @@ def pay(raw: dict = Body(...)):
         "failing": [r.n for r in results if not r.passed], "merchant": decision["merchant"],
         "reasons": [f"Check {r.n} · {r.name}: {r.detail}" for r in results if not r.passed],
         "checks": [r.wire() for r in results], "settlement_error": settlement_error,
-        "log_index": decision["log_index"],
+        "log_index": decision["log_index"], "step_up": step_up,
     })
+    if outcome == "HELD":
+        emit("stepup.requested", "right", {
+            "decision_id": decision_id, "mandate_id": mid, "merchant": req.merchant,
+            "amount_paise": req.claimed_total_paise, "amount": inr(req.claimed_total_paise),
+            "reason": step_up["reason"], "expires_at": step_up["expires_at"],
+            "items": [{"brand": i.brand, "family": i.family, "qty": i.qty,
+                       "unit": inr(i.claimed_unit_price_paise)} for i in req.cart]})
+        t = threading.Timer(STEP_UP_SECONDS, _timeout_stepup, args=(decision_id,))
+        t.daemon = True
+        t.start()
     return decision
 
 
-def _all_spent(conn) -> int:
-    return conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM spend").fetchone()[0]
+# ------------------------------------------------------------------ step-up
+def _resolve(decision_id: str, approve: bool, by: str) -> dict:
+    with LOCK, store.connect() as conn:
+        row = conn.execute("SELECT status, mandate_id, amount_paise FROM stepups WHERE decision_id=?",
+                           (decision_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "no step-up for this decision")
+        status, mid, amount = row
+        if status != "PENDING":
+            raise HTTPException(409, f"already resolved: {status}")
+        drow = conn.execute("SELECT request FROM decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        req = PaymentRequest.model_validate(json.loads(drow[0]))
+        mandate_raw, revoked_at = store.get_mandate(conn, mid)
+        error = None
+        if approve and revoked_at:
+            error = "mandate revoked while waiting for approval"
+        elif approve:
+            error = _settle(decision_id, req, mandate_raw["reserve_block_id"])
+        outcome = "ALLOWED" if approve and not error else "BLOCKED"
+        paid = amount if outcome == "ALLOWED" else 0
+        resolution = sign_obj({
+            "decision_id": decision_id, "outcome": outcome, "resolved_by": by,
+            "resolved_at": now_iso(), "amount_debited_paise": paid, "error": error,
+        }, gw_key(), field="gateway_signature")
+        conn.execute("UPDATE stepups SET status=?, resolution=? WHERE decision_id=?",
+                     (outcome, json.dumps(resolution), decision_id))
+        _log(conn, "STEP_UP_RESOLVED", resolution)
+        if outcome == "ALLOWED":
+            conn.execute("INSERT INTO spend VALUES (?,?,?,?)", (decision_id, mid, paid, now_iso()))
+            _record_brands(conn, mid, req)
+            _log(conn, "DEBIT", {"decision_id": decision_id, "amount_paise": paid,
+                                 "block_id": mandate_raw["reserve_block_id"], "merchant": req.merchant})
+    emit("stepup.resolved", "right", {"decision_id": decision_id, "outcome": outcome, "by": by,
+                                      "amount_paise": paid, "amount": inr(paid), "error": error})
+    return resolution
+
+
+def _timeout_stepup(decision_id: str) -> None:
+    try:
+        _resolve(decision_id, False, "timeout")
+    except HTTPException:
+        pass  # already resolved on the phone
+
+
+@app.post("/stepup/{decision_id}")
+def stepup(decision_id: str, body: dict = Body(...)):
+    """Body: {decision_id, approve: bool, ts, signature} signed by the mandate's phone key."""
+    with store.connect() as conn:
+        row = conn.execute("SELECT mandate_id FROM stepups WHERE decision_id=?", (decision_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "no step-up for this decision")
+        mandate_raw, _ = store.get_mandate(conn, row[0])
+    if body.get("decision_id") != decision_id or not isinstance(body.get("approve"), bool):
+        raise HTTPException(400, "body must name this decision and approve=true/false")
+    if not verify_obj(body, mandate_raw["user"]["phone_pubkey"]):
+        raise HTTPException(401, "approval must be signed by the mandate's phone key")
+    return _resolve(decision_id, body["approve"], "phone")
+
+
+@app.get("/stepup/pending")
+def stepup_pending():
+    with store.connect() as conn:
+        rows = conn.execute("SELECT decision_id, amount_paise, expires_at FROM stepups WHERE status='PENDING'")
+        return {"pending": [{"decision_id": d, "amount_paise": a, "expires_at": e} for d, a, e in rows]}
+
+
+@app.post("/stepup/config")
+def stepup_config(body: dict = Body(...)):
+    with store.connect() as conn:
+        store.kv_set(conn, "stepup", bool(body.get("enabled", True)))
+        return {"enabled": store.kv_get(conn, "stepup", True)}
 
 
 @app.get("/decisions/{decision_id}")
@@ -294,6 +415,60 @@ def get_decision(decision_id: str):
     if not row:
         raise HTTPException(404, "no such decision")
     return {"decision": json.loads(row[0]), "request": json.loads(row[1])}
+
+
+@app.get("/report/{decision_id}")
+def get_report(decision_id: str):
+    """Everything a dispute needs: signed mandate, signed request, the checks, the chain, a verdict."""
+    with store.connect() as conn:
+        row = conn.execute("SELECT decision, request FROM decisions WHERE decision_id=?",
+                           (decision_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "no such decision")
+        decision, request = json.loads(row[0]), json.loads(row[1])
+        mandate, revoked_at = store.get_mandate(conn, decision.get("mandate_id") or "")
+        srow = conn.execute("SELECT resolution FROM stepups WHERE decision_id=?", (decision_id,)).fetchone()
+        resolution = json.loads(srow[0]) if srow and srow[0] else None
+        chain = audit.verify(conn)
+        entries = audit.entries(conn)
+    gw_pub = public_key("gateway")
+    signed_decision = {k: v for k, v in decision.items() if k not in ("log_index", "log_hash")}
+    log_entry = next((e for e in entries if e["index"] == decision.get("log_index")), None)
+    related = {decision_id, request.get("request_id")}
+    timeline = [
+        {"index": e["index"], "timestamp": e["timestamp"], "type": e["type"], "hash": e["hash"]}
+        for e in entries
+        if (e["type"] == "MANDATE_SIGNED" and e["payload"].get("mandate_id") == decision.get("mandate_id"))
+        or (e["type"] == "REVOKE" and e["payload"].get("mandate_id") == decision.get("mandate_id"))
+        or e["payload"].get("request_id") in related or e["payload"].get("decision_id") in related
+    ]
+    return {
+        "decision": decision,
+        "request": request,
+        "mandate": mandate,
+        "mandate_status": "REVOKED" if revoked_at else "ACTIVE",
+        "revoked_at": revoked_at,
+        "resolution": resolution,
+        "signatures": {
+            "mandate": bool(mandate) and verify_obj(mandate, mandate["user"]["phone_pubkey"]),
+            "request": isinstance(request.get("agent_pubkey"), str) and verify_obj(request, request["agent_pubkey"]),
+            "request_key_in_mandate": bool(mandate) and request.get("agent_pubkey") == mandate["agent_pubkey"],
+            "decision": verify_obj(signed_decision, gw_pub, field="gateway_signature"),
+            "resolution": verify_obj(resolution, gw_pub, field="gateway_signature") if resolution else None,
+        },
+        "fingerprints": {
+            "phone_key": fingerprint(mandate["user"]["phone_pubkey"]) if mandate else None,
+            "agent_key": fingerprint(request.get("agent_pubkey", "")),
+            "gateway_key": fingerprint(gw_pub),
+            "mandate_signature": fingerprint(mandate["signature"]) if mandate else None,
+            "request_signature": fingerprint(request.get("signature", "")),
+            "decision_signature": fingerprint(decision.get("gateway_signature", "")),
+        },
+        "chain": {**chain, "decision_entry_matches": bool(log_entry) and log_entry["payload"] == signed_decision
+                  and log_entry["hash"] == decision.get("log_hash")},
+        "timeline": timeline,
+        "verdict": report.verdict(decision, resolution, revoked_at),
+    }
 
 
 @app.get("/decisions/{decision_id}/verify")
