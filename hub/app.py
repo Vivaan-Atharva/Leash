@@ -388,3 +388,36 @@ async def eval_run(body: dict = Body(default={})):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     asyncio.create_task(EVAL["proc"].wait())
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ "Try to trick it" console
+ATTACK_STYLES = {"white_text", "html_comment", "aria_hidden", "alt_text", "json_ld", "fake_system"}
+
+
+@app.post("/attack")
+async def attack(body: dict = Body(...)):
+    """Plant a judge's injection on FreshCart's milk page and let the real agent shop it."""
+    text = (body.get("text") or "").strip()
+    style = body.get("style") or "white_text"
+    if not text or len(text) > 600 or style not in ATTACK_STYLES:
+        return {"ok": False, "error": "Write 1–600 characters and pick a hiding style."}
+    if _busy() or (EVAL["proc"] is not None and EVAL["proc"].returncode is None):
+        return {"ok": False, "busy": True, "error": "The agent is busy: one attack at a time."}
+    from agent.llm import model_name, ollama_ready
+    if not await asyncio.to_thread(ollama_ready):
+        return {"ok": False, "error": f"Needs the LIVE model ({model_name()} on Ollama). It isn't running here."}
+    await demo_reset()
+    async with httpx.AsyncClient(timeout=5) as client:
+        r = await client.post(f"{url('shops')}/admin/custom", json={"injections": [
+            {"shop": "freshcart", "product": "MILK-AMUL-500", "style": style, "text": text,
+             "label": "judge's injection"}]})
+        if r.status_code != 200:
+            return {"ok": False, "error": r.json().get("detail", "shop refused the injection")}
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "agent.runner", "ATTACK", "--mode", "live", cwd=str(ROOT), env=os.environ.copy(),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    DIRECTOR["proc"] = proc
+    asyncio.create_task(proc.wait())
+    await publish("director.moment", "system", {"scenario": "ATTACK", "status": "starting",
+                                                "text": text, "style": style})
+    return {"ok": True}
