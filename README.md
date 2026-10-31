@@ -4,7 +4,18 @@ A payment gateway between an AI shopping agent and a UPI Reserve Pay–style rai
 mandate on their phone; every payment the agent asks for must pass six deterministic checks, or ₹0 moves.
 The agent has no key that moves money on the protected wallet. Only the gateway does.
 
-## Run
+## Run on a fresh machine
+Needs Python 3.11+, Node 20+, and [Ollama](https://ollama.com) for LIVE mode.
+```
+git clone https://github.com/Vivaan-Atharva/Leash.git && cd Leash
+make setup                 # venv, deps, this machine's demo keys, web deps
+ollama pull qwen2.5:3b     # or set LEASH_MODEL to another tool-calling model
+make test                  # should be all green
+make demo                  # opens Mission Control
+make golden                # (once) record LIVE runs S0–S5 as REPLAY backups, then commit traces/golden
+```
+
+## Commands
 ```
 make setup          # venv, Python deps, demo keys, web deps
 make demo           # everything + production web build, opens Mission Control
