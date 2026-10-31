@@ -1,5 +1,9 @@
 PY := .venv/bin/python
 S ?= all
+# MODEL=llama3.1:8b picks another Ollama model for the agent (shown on Mission Control).
+ifdef MODEL
+export LEASH_MODEL := $(MODEL)
+endif
 # Any Python 3.11+ works; prefer the newest found.
 SYSPY := $(shell for p in python3.13 python3.12 python3.11 python3; do command -v $$p >/dev/null && $$p -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null && echo $$p && break; done)
 

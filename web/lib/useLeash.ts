@@ -46,7 +46,9 @@ export type Director = {
 
 export type State = {
   connected: boolean;
-  mode: string; // LIVE | REPLAY | SCRIPTED
+  mode: string; // what the hub will use for the next run: LIVE | REPLAY
+  runMode: string | null; // what the last run actually used: LIVE | REPLAY | SCRIPTED
+  fallback: string | null; // why the last run didn't use the requested mode
   model: string | null;
   left: { balance: number | null; payments: Payment[] };
   right: { balance: number | null; decision: Decision | null; decisions: Decision[]; pending: string | null };
@@ -67,6 +69,8 @@ export type State = {
 const initial: State = {
   connected: false,
   mode: "LIVE",
+  runMode: null,
+  fallback: null,
   model: null,
   left: { balance: null, payments: [] },
   right: { balance: null, decision: null, decisions: [], pending: null },
@@ -108,7 +112,9 @@ function reduce(s: State, a: Action): State {
   switch (e.type) {
     case "system.mode":
       if (d.reset) return { ...initial, connected: s.connected, mode: d.mode ?? s.mode, resetSeq: e.seq, mandate: s.mandate };
-      return { ...s, mode: d.mode ?? s.mode, model: d.model !== undefined ? d.model : s.model };
+      if (d.scenario) // a run announcing the mode it actually used
+        return { ...s, runMode: d.mode, fallback: d.fallback_reason ?? null, model: d.model ?? null };
+      return { ...s, mode: d.mode ?? s.mode, runMode: null, fallback: null }; // presenter toggled LIVE/REPLAY
     case "score.update":
       return { ...s, score: { ...s.score, ...d } };
     case "director.moment": {

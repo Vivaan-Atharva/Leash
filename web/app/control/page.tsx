@@ -38,6 +38,9 @@ export default function MissionControl() {
 
   useEffect(() => {
     getJSON(api.hub("/netinfo")).then((n) => setPhoneUrl(n.phone_url)).catch(() => {});
+    // /control?table=1 → the 60-second table demo: S1, then the results screen.
+    const table = new URLSearchParams(window.location.search).has("table");
+    postJSON(api.hub(`/director/playlist/${table ? "table" : "stage"}`)).catch(() => {});
   }, []);
   useEffect(() => {
     setXray(false);
@@ -120,7 +123,7 @@ export default function MissionControl() {
 
   return (
     <div ref={root} className="relative flex h-screen min-h-[720px] flex-col overflow-hidden text-[clamp(13px,0.95vw,20px)]">
-      <TopBar mode={state.mode} model={state.model} connected={state.connected} mandate={state.mandate} phoneUrl={phoneUrl} moment={label} />
+      <TopBar mode={state.runMode ?? state.mode} fallback={state.fallback} model={state.model} connected={state.connected} mandate={state.mandate} phoneUrl={phoneUrl} moment={label} />
 
       <main className="grid min-h-0 flex-1 grid-cols-[1fr_1.45fr_1fr] gap-5 px-6 py-4 short:py-2">
         <LeftLane balance={state.left.balance} payments={state.left.payments} lost={state.score.left_lost_paise} targetRef={leftRef} />

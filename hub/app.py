@@ -234,14 +234,24 @@ async def preflight():
             "all present" if not golden else f"missing {', '.join(golden)} (REPLAY falls back to SCRIPTED)",
             required=False)
         import time
+        try:
+            batt = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=2).stdout
+            add("laptop on power", "AC Power" in batt, "plugged in" if "AC Power" in batt else "on battery: plug in",
+                required=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
         age = time.time() - PHONE["last"]
         add("phone connected", age < 10, f"last heartbeat {int(age)} s ago" if PHONE["last"] else "no phone yet",
             required=False)
         try:
             r = await client.get("http://127.0.0.1:11434/api/tags")
+            from agent.llm import model_name, ollama_ready
+            ready = await asyncio.to_thread(ollama_ready)
             add("ollama", r.status_code == 200, "running", required=False)
+            add(f"model {model_name()} pulled", ready, "ready" if ready else f"run: ollama pull {model_name()}",
+                required=False)
         except httpx.HTTPError:
-            add("ollama", False, "not running (needed from Phase 2)", required=False)
+            add("ollama", False, "not running (needed for LIVE mode and the attack console)", required=False)
     ok = all(i["ok"] for i in items if i["required"])
     return {"ok": ok, "items": items}
 
@@ -309,6 +319,8 @@ async def director_state():
 async def director_playlist(name: str):
     if name not in PLAYLISTS:
         return {"ok": False, "error": f"playlists: {sorted(PLAYLISTS)}"}
+    if DIRECTOR["playlist"] == name:  # a page refresh mid-demo must not rewind the director
+        return {"ok": True, "playlist": name, "moments": MOMENTS, "unchanged": True}
     MOMENTS[:] = PLAYLISTS[name]
     DIRECTOR.update(playlist=name, index=-1)
     await publish("director.moment", "system", {"index": -1, "moment": None, "playlist": name,

@@ -92,11 +92,17 @@ def run(sid: str, mode: str = "auto", promote: bool = False, speed: float = 1.0)
     http = httpx.Client(timeout=15)
     sc = attack_scenario() if sid == "ATTACK" else load(sid)
     used = resolve_mode(sid, mode)
+    reason = None
+    if mode in ("live", "auto") and used != "live":
+        reason = f"Ollama/{llm.model_name()} unavailable"
+    elif mode == "replay" and used == "scripted":
+        reason = f"no golden trace for {sid}"
     if sid == "ATTACK" and used != "live":
         hub_event(http, "director.moment", {"scenario": sid, "status": "error",
                                             "text": "The attack console needs the LIVE model (Ollama)."})
         return {"id": sid, "mode": used, "ok": False, "error": "needs_live_model"}
-    hub_event(http, "system.mode", {"mode": used.upper(), "scenario": sid,
+    hub_event(http, "system.mode", {"mode": used.upper(), "scenario": sid, "requested": mode.upper(),
+                                    "fallback_reason": reason,
                                     "model": llm.model_name() if used == "live" else None})
     http.post(f"{url('hub')}/director/active", json={
         "scenario": sid, "name": sc["name"], "attack": sc["attack"], "mode": used})

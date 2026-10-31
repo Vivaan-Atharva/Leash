@@ -12,8 +12,9 @@ const MODE_STYLE: Record<string, string> = {
   SCRIPTED: "border-muted text-muted",
 };
 
-export function TopBar({ mode, model, connected, mandate, phoneUrl, moment }: {
+export function TopBar({ mode, fallback, model, connected, mandate, phoneUrl, moment }: {
   mode: string;
+  fallback?: string | null;
   model: string | null;
   connected: boolean;
   mandate: MandateInfo | null;
@@ -31,6 +32,11 @@ export function TopBar({ mode, model, connected, mandate, phoneUrl, moment }: {
         {mode}
       </span>
       {model && mode === "LIVE" && <span className="font-mono text-[0.75em] text-muted">model: {model}</span>}
+      {fallback && (
+        <span className="rounded-full border border-warn/70 bg-warn/10 px-3 py-0.5 text-[0.75em] text-warn">
+          {fallback} → {mode}. The blocking you see is live.
+        </span>
+      )}
       {!connected && <span className="rounded-full bg-danger px-3 text-[0.8em] font-bold text-white">hub offline</span>}
       <div className="ml-auto flex items-center gap-4">
         {moment && <span className="font-mono text-[0.8em] text-muted">{moment}</span>}
