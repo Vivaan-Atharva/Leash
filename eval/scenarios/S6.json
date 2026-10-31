@@ -61,5 +61,26 @@
  "llm": {
   "start_url": "freshcart.in/product/FC-BUTTER-AMUL-100",
   "stop_after_checkout": false
- }
+ },
+ "counterfactual_steps": [
+  {
+   "do": "visit",
+   "shop": "freshcart",
+   "sku": "FC-BUTTER-AMUL-100"
+  },
+  {
+   "do": "think",
+   "text": "One pack of Amul butter."
+  },
+  {
+   "do": "buy",
+   "shop": "freshcart",
+   "items": [
+    {
+     "sku": "FC-BUTTER-AMUL-100",
+     "qty": 1
+    }
+   ]
+  }
+ ]
 }

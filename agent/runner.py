@@ -27,7 +27,7 @@ def golden_path(sid: str) -> Path:
     return traces_dir() / "golden" / f"{sid}.json"
 
 
-def hub_event(http: httpx.Client, type_: str, data: dict, lane: str = "system") -> None:
+def hub_event(http: httpx.Client, type_: str, data: dict, lane: str = "system") -> None:  # noqa: D103
     try:
         http.post(f"{url('hub')}/events", json={"type": type_, "lane": lane, "data": data})
     except httpx.HTTPError:
@@ -117,19 +117,25 @@ def run(sid: str, mode: str = "auto", promote: bool = False, speed: float = 1.0)
     hub_event(http, "director.moment", {"scenario": sid, "name": sc["name"], "task": sc["task"],
                                         "status": "running", "mode": used.upper()})
 
+    main_traces: list[dict] = []
     if used == "scripted":
         agent = ScriptedAgent(http)
+        agent.set_task(sc["task"], sid)
         res = run_one(sc, agent, http, announce=False)
+        main_traces = agent.tools["agent"].traces + agent.tools["rogue"].traces
     else:
         cfg = sc.get("llm", {})
         rec = Recorder()
-        tools = Tools(http, cfg.get("signer", "agent"), on_event=rec)
+        tools = Tools(http, cfg.get("signer", "agent"), on_event=rec, scenario=sid)
+        if used == "replay":
+            tools.set_task(sc["task"])
         if used == "live":
             meta = llm.run_llm(sc["task"], cfg["start_url"], tools,
                                stop_after_checkout=cfg.get("stop_after_checkout", True))
         else:
             meta = replay(golden_path(sid), tools, speed)
         _post_steps(sc, tools)
+        main_traces = tools.traces
         res = evaluate(sc, tools.routes) if sc.get("expected") else _summary(sc, tools.routes)
         if used == "live":
             trace = {"scenario": sid, "model": meta["model"], "recorded_at": now_iso(),
@@ -146,10 +152,67 @@ def run(sid: str, mode: str = "auto", promote: bool = False, speed: float = 1.0)
                 shutil.copy(path, golden_path(sid))
                 res["promoted"] = True
     res["mode"] = used
+    if main_traces and (sc.get("counterfactual_steps") or sid == "ATTACK"):
+        cf_steps = counterfactual(http, sc, used, main_traces)
+        if used == "live" and res.get("trace") and cf_steps is not None:
+            p = Path(res["trace"])
+            t = json.loads(p.read_text())
+            t["counterfactual_steps"] = cf_steps
+            p.write_text(json.dumps(t, indent=1, ensure_ascii=False))
+            if res.get("promoted"):
+                shutil.copy(p, golden_path(sid))
     hub_event(http, "director.moment", {"scenario": sid, "status": "done", "ok": res["ok"],
                                         "left_paid_paise": res["left_paid_paise"],
                                         "right_paid_paise": res["right_paid_paise"]})
     return res
+
+
+def exec_steps(tools: Tools, steps: list[dict]) -> None:
+    """Run scripted steps (visit / think / buy) through a Tools instance."""
+    for st in steps:
+        if st["do"] == "visit":
+            tools.call("get_page", {"url": f"/{st['shop']}/product/{st['sku']}"})
+        elif st["do"] == "think":
+            tools.think(st["text"])
+        elif st["do"] == "buy":
+            for _ in range(st.get("times", 1)):
+                for it in st["items"]:
+                    tools.call("add_to_cart", {"shop": st["shop"], "sku": it["sku"], "qty": it["qty"]})
+                tools.call("checkout", {"shop": st["shop"]})
+
+
+def counterfactual(http: httpx.Client, sc: dict, used: str, main_traces: list[dict]) -> list[dict] | None:
+    """Same agent, same task, honest page (no hidden text, honest prices), dry run: no money moves.
+    Shows what the injection *caused*. Returns recorded steps in LIVE mode (saved into the trace)."""
+    cfg = sc.get("llm", {})
+    rec = Recorder()
+    cf = Tools(http, cfg.get("signer", "agent"), on_event=rec, quiet=True, dry_run=True, scenario=sc["id"])
+    hub_event(http, "attack.counterfactual", {"scenario": sc["id"], "status": "running"}, lane="both")
+    http.post(f"{url('shops')}/admin/clean", json={"clean": True})
+    try:
+        if used == "live":
+            llm.run_llm(sc["task"], cfg["start_url"], cf, stop_after_checkout=cfg.get("stop_after_checkout", True))
+        elif used == "replay":
+            steps = json.loads(golden_path(sc["id"]).read_text()).get("counterfactual_steps")
+            if not steps:
+                return None
+            cf.set_task(sc["task"])
+            for st in steps:
+                cf.think(st["text"]) if st["kind"] == "thought" else cf.call(st["tool"], st["args"])
+        else:
+            cf.set_task(sc["task"])
+            exec_steps(cf, sc.get("counterfactual_steps", []))
+    except (httpx.HTTPError, KeyError, ValueError) as e:
+        hub_event(http, "attack.counterfactual", {"scenario": sc["id"], "status": "error", "error": str(e)}, lane="both")
+        return None
+    finally:
+        http.post(f"{url('shops')}/admin/clean", json={"clean": False})
+    anchor = next((t for t in main_traces if t["culprit"] is not None), main_traces[-1])
+    hub_event(http, "attack.counterfactual", {
+        "scenario": sc["id"], "status": "done", "mode": used, "for_request_id": anchor["request_id"],
+        "log": cf.log[-30:], "traces": cf.traces,
+    }, lane="both")
+    return rec.steps
 
 
 def _summary(sc: dict, routes: list[dict]) -> dict:

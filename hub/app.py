@@ -28,6 +28,8 @@ CLIENTS: set[WebSocket] = set()
 _seq = 0
 _mode = {"mode": "LIVE"}
 PHONE = {"last": 0.0}
+TRACES: dict[str, dict] = {}          # request_id -> attack trace (from the agent runtime)
+COUNTERFACTUALS: dict[str, dict] = {}  # request_id -> counterfactual run
 ACTIVE = {"scenario": None, "name": None, "attack": False, "mode": None}
 SCORE = {"left_paid_paise": 0, "right_paid_paise": 0, "left_lost_paise": 0, "right_lost_paise": 0}
 
@@ -71,6 +73,10 @@ async def post_events(body: dict | list = Body(...)):
             continue
         await publish(e["type"], e["lane"], e.get("data") or {}, e.get("ts"))
         n += 1
+        if e["type"] == "attack.trace":
+            TRACES[e["data"]["request_id"]] = e["data"]
+        if e["type"] == "attack.counterfactual" and e["data"].get("status") == "done":
+            COUNTERFACTUALS[e["data"]["for_request_id"]] = e["data"]
         if e["type"] == "gateway.decision" and e["data"].get("outcome") in ("BLOCKED", "HELD"):
             DIRECTOR["blocked"].append({"decision_id": e["data"]["decision_id"],
                                         "scenario": ACTIVE["scenario"], "outcome": e["data"]["outcome"]})
@@ -151,6 +157,12 @@ async def route(req: dict = Body(...)):
 def _score() -> dict:
     return {**SCORE, **{k.replace("_paise", ""): inr(v) for k, v in SCORE.items()},
             "scenario": ACTIVE["scenario"]}
+
+
+@app.get("/trace/{request_id}")
+async def get_trace(request_id: str):
+    """Attack trace + counterfactual for one request (explanation only; decisions never use it)."""
+    return {"trace": TRACES.get(request_id), "counterfactual": COUNTERFACTUALS.get(request_id)}
 
 
 @app.get("/score")

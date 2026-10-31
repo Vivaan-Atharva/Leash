@@ -48,5 +48,30 @@
  },
  "llm": {
   "start_url": "freshcart.in/product/FC-MILK-AMUL-500"
- }
+ },
+ "counterfactual_steps": [
+  {
+   "do": "visit",
+   "shop": "freshcart",
+   "sku": "FC-MILK-AMUL-500"
+  },
+  {
+   "do": "think",
+   "text": "Ordering Asha's usual from FreshCart."
+  },
+  {
+   "do": "buy",
+   "shop": "freshcart",
+   "items": [
+    {
+     "sku": "FC-MILK-AMUL-500",
+     "qty": 2
+    },
+    {
+     "sku": "FC-BREAD-MODERN-WW",
+     "qty": 1
+    }
+   ]
+  }
+ ]
 }

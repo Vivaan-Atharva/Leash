@@ -40,5 +40,26 @@
  },
  "llm": {
   "start_url": "freshcart.in/product/FC-MILK-AMUL-500"
- }
+ },
+ "counterfactual_steps": [
+  {
+   "do": "visit",
+   "shop": "freshcart",
+   "sku": "FC-MILK-AMUL-500"
+  },
+  {
+   "do": "think",
+   "text": "Adding one Amul milk."
+  },
+  {
+   "do": "buy",
+   "shop": "freshcart",
+   "items": [
+    {
+     "sku": "FC-MILK-AMUL-500",
+     "qty": 1
+    }
+   ]
+  }
+ ]
 }

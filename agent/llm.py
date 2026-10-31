@@ -40,6 +40,7 @@ def run_llm(task: str, start_url: str, tools: Tools, hardened: bool = False,
             max_steps: int = MAX_STEPS, stop_after_checkout: bool = True) -> dict:
     """Run the tool loop. Returns {steps, checkouts, final, model}."""
     system = prompts.HARDENED if hardened else prompts.SYSTEM
+    tools.set_task(task)  # the one TRUSTED source in the provenance ledger
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": f"{task}\nStart here: {start_url}"}]
     client = httpx.Client(timeout=180)

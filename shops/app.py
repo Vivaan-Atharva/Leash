@@ -23,7 +23,7 @@ PRODUCTS = {p["key"]: p for p in CATALOG["products"]}
 app = FastAPI(title="Leash shops")
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 LOCK = threading.Lock()
-STATE = {"scenario": "S0", "carts": {s: {} for s in SHOPS}, "custom": [], "custom_prices": {}}
+STATE = {"scenario": "S0", "carts": {s: {} for s in SHOPS}, "custom": [], "custom_prices": {}, "clean": False}
 
 
 def _shop(shop_id: str) -> dict:
@@ -37,6 +37,8 @@ def _scenario() -> dict:
 
 
 def price(shop_id: str, key: str) -> int | None:
+    if STATE["clean"]:  # counterfactual: the honest shop
+        return CATALOG["prices"][shop_id].get(key)
     override = STATE["custom_prices"].get(shop_id, {}).get(key)
     if override is None:
         override = _scenario()["price_overrides"].get(shop_id, {}).get(key)
@@ -89,6 +91,8 @@ def render_injection(inj: dict) -> str:
 
 
 def injections_for(shop_id: str, key: str) -> list[dict]:
+    if STATE["clean"]:
+        return []
     items = [i for i in _scenario()["injections"] + STATE["custom"]
              if i["shop"] == shop_id and i["product"] in (key, "*")]
     return [{**i, "html": render_injection(i)} for i in items]
@@ -192,14 +196,24 @@ def set_scenario(scenario_id: str):
     with LOCK:
         STATE["scenario"] = scenario_id
         STATE["carts"] = {s: {} for s in SHOPS}
+        STATE["clean"] = False
     return {"scenario": scenario_id}
 
 
 @app.post("/admin/reset")
 def reset():
     with LOCK:
-        STATE.update(scenario="S0", carts={s: {} for s in SHOPS}, custom=[], custom_prices={})
+        STATE.update(scenario="S0", carts={s: {} for s in SHOPS}, custom=[], custom_prices={}, clean=False)
     return {"ok": True}
+
+
+@app.post("/admin/clean")
+def set_clean(body: dict = Body(...)):
+    """Counterfactual switch: serve every page without injections and at honest prices."""
+    with LOCK:
+        STATE["clean"] = bool(body.get("clean"))
+        STATE["carts"] = {s: {} for s in SHOPS}
+    return {"clean": STATE["clean"]}
 
 
 STYLES = {"white_text", "html_comment", "aria_hidden", "alt_text", "json_ld", "fake_system"}

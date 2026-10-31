@@ -226,40 +226,56 @@ def _record_brands(conn, mandate_id: str, req: PaymentRequest) -> None:
             conn.execute("INSERT OR IGNORE INTO brands VALUES (?,?,?)", (mandate_id, p["family"], p["brand"]))
 
 
+def _decide(conn, raw: dict):
+    """Everything up to the decision: parse, load state, run the checks, step-up. No side effects."""
+    try:
+        req = PaymentRequest.model_validate(raw)
+    except ValidationError:
+        req = None
+    profile = store.kv_get(conn, "profile", "leash")
+    mandate_raw, revoked_at = store.get_mandate(conn, raw.get("mandate_id", "")) \
+        if isinstance(raw.get("mandate_id"), str) else (None, None)
+    mandate = Mandate.model_validate(mandate_raw) if mandate_raw else None
+    nonce = raw.get("nonce") if isinstance(raw.get("nonce"), str) else ""
+    mid = mandate.mandate_id if mandate else ""
+    state = checks.State(
+        now=utcnow(),
+        registered_agents=frozenset(r[0] for r in conn.execute("SELECT pubkey FROM agents")),
+        revoked_at=revoked_at,
+        nonce_seen=conn.execute("SELECT 1 FROM nonces WHERE nonce=?", (nonce,)).fetchone() is not None,
+        week_spent_paise=store.week_spent(conn, mid),
+        block_remaining_paise=store.kv_get(conn, "block_amount", 0) - store.all_committed(conn),
+        catalog=catalog.load(),
+    )
+    results = checks.run_checks(profile, req, mandate, state)
+    outcome = checks.outcome(results)
+    step_up = None
+    if outcome == "ALLOWED" and profile == "leash" and store.kv_get(conn, "stepup", True):
+        known = frozenset(checks.usual_brands(mandate) | store.known_brands(conn, mid))
+        reason = checks.step_up_reason(req, mandate, state, known)
+        if reason:
+            outcome = "HELD"
+            step_up = {"reason": reason, "expires_at": iso(state.now + timedelta(seconds=STEP_UP_SECONDS))}
+    return req, mandate, mid, nonce, profile, results, outcome, step_up
+
+
+@app.post("/evaluate")
+def evaluate(raw: dict = Body(...)):
+    """What *would* Leash decide? Same checks as /pay, but nothing is logged, recorded or settled.
+    Used by counterfactual replays ("the same agent on the same page without the hidden text")."""
+    t0 = time.perf_counter_ns()
+    with LOCK, store.connect() as conn:
+        _, _, _, _, profile, results, outcome, step_up = _decide(conn, raw)
+    return {"dry_run": True, "request_id": raw.get("request_id"), "profile": profile, "outcome": outcome,
+            "checks": [r.wire() for r in results], "step_up": step_up,
+            "decided_in_us": (time.perf_counter_ns() - t0) // 1000}
+
+
 @app.post("/pay")
 def pay(raw: dict = Body(...)):
     t0 = time.perf_counter_ns()
     with LOCK, store.connect() as conn:
-        try:
-            req = PaymentRequest.model_validate(raw)
-        except ValidationError:
-            req = None
-        profile = store.kv_get(conn, "profile", "leash")
-        mandate_raw, revoked_at = store.get_mandate(conn, raw.get("mandate_id", "")) \
-            if isinstance(raw.get("mandate_id"), str) else (None, None)
-        mandate = Mandate.model_validate(mandate_raw) if mandate_raw else None
-        nonce = raw.get("nonce") if isinstance(raw.get("nonce"), str) else ""
-        mid = mandate.mandate_id if mandate else ""
-        state = checks.State(
-            now=utcnow(),
-            registered_agents=frozenset(r[0] for r in conn.execute("SELECT pubkey FROM agents")),
-            revoked_at=revoked_at,
-            nonce_seen=conn.execute("SELECT 1 FROM nonces WHERE nonce=?", (nonce,)).fetchone()
-            is not None,
-            week_spent_paise=store.week_spent(conn, mid),
-            block_remaining_paise=store.kv_get(conn, "block_amount", 0) - store.all_committed(conn),
-            catalog=catalog.load(),
-        )
-        results = checks.run_checks(profile, req, mandate, state)
-        outcome = checks.outcome(results)
-        step_up = None
-        if outcome == "ALLOWED" and profile == "leash" and store.kv_get(conn, "stepup", True):
-            known = frozenset(checks.usual_brands(mandate) | store.known_brands(conn, mid))
-            reason = checks.step_up_reason(req, mandate, state, known)
-            if reason:
-                outcome = "HELD"
-                step_up = {"reason": reason,
-                           "expires_at": iso(state.now + timedelta(seconds=STEP_UP_SECONDS))}
+        req, mandate, mid, nonce, profile, results, outcome, step_up = _decide(conn, raw)
         decided_in_us = (time.perf_counter_ns() - t0) // 1000
 
         # ---- record (outside the timed decision) ----

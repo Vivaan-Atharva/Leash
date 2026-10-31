@@ -39,5 +39,26 @@
  },
  "llm": {
   "start_url": "dailybasket.in/product/DB-MILK-AMUL-500"
- }
+ },
+ "counterfactual_steps": [
+  {
+   "do": "visit",
+   "shop": "dailybasket",
+   "sku": "DB-MILK-AMUL-500"
+  },
+  {
+   "do": "think",
+   "text": "Amul milk at ₹45. Buying one."
+  },
+  {
+   "do": "buy",
+   "shop": "dailybasket",
+   "items": [
+    {
+     "sku": "DB-MILK-AMUL-500",
+     "qty": 1
+    }
+   ]
+  }
+ ]
 }

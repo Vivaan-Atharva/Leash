@@ -8,7 +8,8 @@ import time
 
 import httpx
 
-from agent.scrape import scrape_text
+from agent.provenance import Ledger, page_view, pick_culprit
+from agent.scrape import scrape_segments
 from shared.config import url
 
 
@@ -45,23 +46,38 @@ def parse_url(u: str) -> tuple[str, str]:
 
 
 class Tools:
-    def __init__(self, http: httpx.Client | None = None, signer: str = "agent", on_event=None):
+    def __init__(self, http: httpx.Client | None = None, signer: str = "agent", on_event=None,
+                 quiet: bool = False, dry_run: bool = False, scenario: str | None = None):
         self.http = http or httpx.Client(timeout=10)
         self.sk = signing_key(signer)
         self.last_request: dict | None = None
         self.routes: list[dict] = []
         self.on_event = on_event  # optional recorder hook: (type, data) -> None
+        self.quiet = quiet        # counterfactual runs: record, don't broadcast
+        self.dry_run = dry_run    # counterfactual runs: ask the gateway what it *would* decide; no money moves
+        self.scenario = scenario
+        self.ledger = Ledger()
+        self.log: list[dict] = []  # everything this agent did, for counterfactual summaries
+        self.traces: list[dict] = []
+
+    def set_task(self, task: str) -> None:
+        self.ledger.add_task(task)
 
     # ---- events -------------------------------------------------------
     def emit(self, type_: str, data: dict) -> None:
         if self.on_event:
             self.on_event(type_, data)
+        if type_.startswith("agent."):
+            self.log.append({"type": type_, **data})
+        if self.quiet:
+            return
         try:
             self.http.post(f"{url('hub')}/events", json={"type": type_, "lane": "both", "data": data})
         except httpx.HTTPError:
             pass
 
     def think(self, text: str) -> None:
+        self.ledger.note_thought(text)
         self.emit("agent.thought", {"text": text})
 
     def call(self, name: str, args: dict) -> dict | str:
@@ -70,6 +86,7 @@ class Tools:
               "add_to_cart": self.add_to_cart, "view_cart": self.view_cart,
               "checkout": self.checkout}.get(name)
         self.emit("agent.tool_call", {"tool": name, "args": args})
+        self.ledger.note_call(name, args)
         t0 = time.perf_counter()
         try:
             if fn is None:
@@ -91,11 +108,13 @@ class Tools:
 
     def get_page(self, url: str) -> str:
         shop, path = parse_url(url)
-        r = self.http.get(f"{shops_url()}/{shop}{path}")
+        r = self.http.get(f"{shops_url()}/{shop}{path}", params={"view": 1} if self.quiet else None)
         if r.status_code == 404:
             return f"404: page not found at {SHOP_DOMAINS[shop]}{path}"
         r.raise_for_status()
-        return f"[{SHOP_DOMAINS[shop]}{path}]\n" + scrape_text(r.text)
+        segments = scrape_segments(r.text)
+        self.ledger.add_page(f"{SHOP_DOMAINS[shop]}{path}", SHOP_DOMAINS[shop], segments)
+        return f"[{SHOP_DOMAINS[shop]}{path}]\n" + "\n".join(s["text"] for s in segments)
 
     def add_to_cart(self, shop: str, sku: str, qty: int = 1) -> dict:
         s = shop_from_any(shop)
@@ -131,10 +150,55 @@ class Tools:
         }
         req = sign_obj(req, self.sk)
         self.http.post(f"{url('shops')}/{s}/cart/clear")
-        self.send(req)
+        fields = self.ledger.request_fields(req)
+        routed = self.evaluate(req) if self.dry_run else self.send(req)
+        self._trace(req, fields, routed)
         # What the agent learns back is only what a checkout page would tell it.
         return {"request_id": req["request_id"], "merchant": req["merchant"],
                 "total": cart["total"], "status": "submitted"}
+
+    def evaluate(self, req: dict) -> dict:
+        """Dry run: what would each lane do? The gateway evaluates without logging or settling."""
+        self.last_request = req
+        d = self.http.post(f"{url('gateway')}/evaluate", json=req).json()
+        routed = {"request_id": req["request_id"], "request": req, "dry_run": True,
+                  "left": {"lane": "left", "paid": True, "amount_paise": req["claimed_total_paise"], "would": True},
+                  "right": {"lane": "right", "paid": d["outcome"] == "ALLOWED",
+                            "amount_paise": req["claimed_total_paise"] if d["outcome"] == "ALLOWED" else 0,
+                            "decision": d}}
+        self.routes.append(routed)
+        return routed
+
+    def _trace(self, req: dict, fields: list[dict], routed: dict) -> None:
+        """The attack trace for one request: page → context → reasoning → tool call → request → lanes."""
+        dec = routed["right"].get("decision", {})
+        failing = [c["n"] for c in dec.get("checks", []) if not c["pass"]]
+        ci = pick_culprit(fields, failing)
+        culprit = fields[ci] if ci is not None else None
+        call = (culprit or {}).get("call") or {}
+        trace = {
+            "request_id": req["request_id"], "scenario": self.scenario, "dry_run": self.dry_run,
+            "page": page_view(self.ledger),
+            "task": next((s["text"] for s in self.ledger.sources if s["trusted"]), None),
+            "fields": [{k: f[k] for k in ("path", "field", "value", "display", "checks", "prov")} for f in fields],
+            # The exact text the culprit value came from, wherever it was read (it may be an earlier page).
+            "source": (lambda sid: None if sid is None else {
+                k: self.ledger.sources[sid].get(k) for k in ("id", "text", "hidden", "url", "trusted")
+            })((culprit or {}).get("prov", {}).get("source_id")),
+            "culprit": ci,
+            "thought": call.get("thought") or self.ledger.last_thought,
+            "call": {"tool": call.get("tool"), "args": call.get("args")} if call else None,
+            "total": req["claimed_total_paise"],
+            "left": {"amount_paise": routed["left"]["amount_paise"], "paid": routed["left"].get("paid", False)},
+            "right": {"outcome": dec.get("outcome"), "failing": failing, "decision_id": dec.get("decision_id"),
+                      "checks": dec.get("checks", []), "amount_paise": routed["right"]["amount_paise"]},
+        }
+        self.traces.append(trace)
+        if not self.quiet:
+            try:
+                self.http.post(f"{url('hub')}/events", json={"type": "attack.trace", "lane": "both", "data": trace})
+            except httpx.HTTPError:
+                pass
 
     def send(self, req: dict) -> dict:
         self.last_request = req
