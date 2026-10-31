@@ -109,7 +109,7 @@ Leash enforces the mandate. It can't tell a manipulated choice from a real one i
 - **In-scope steering:** an allowed brand at a fair price (S9). Step-up asks Asha first when it's a new brand.
 - **Order splitting under the weekly cap,** and **duplicate orders** that both fit the limits (A05, A12).
 
-See [docs/threat-model.md](docs/threat-model.md).
+See [docs/threat-model.md](docs/threat-model.md). For everything in one place (architecture, research, evidence, runbook, demo script), read [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Repo
 `shared/` contracts, canonical JSON, signing, paise · `gateway/` checks, step-up, audit log, report ·
