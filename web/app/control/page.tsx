@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChainBar } from "@/components/ChainBar";
 import { LeftLane, RightLane } from "@/components/Lanes";
-import { DirectorBanner, Totals } from "@/components/Overlays";
+import { DirectorBanner, ReportOverlay, Totals } from "@/components/Overlays";
 import { Packet } from "@/components/Packet";
 import { RevokeSnap } from "@/components/RevokeSnap";
 import { ShopView } from "@/components/ShopView";
@@ -14,7 +14,7 @@ import { useLeash } from "@/lib/useLeash";
 
 const MOMENT_NAMES: Record<string, string> = {
   S0: "Honest purchase", S1: "40 packs", S2: "Look-alike shop", S3: "3× price", S4: "Hidden gift card",
-  REVOKE: "Pull the leash", S5: "After revoke", TOTALS: "Totals",
+  REVOKE: "Pull the leash", S5: "After revoke", TOTALS: "Totals", REPORT: "Dispute report", RESULTS: "Results",
   S6: "Order splitting", S7: "Replay", S8: "Unregistered agent", S9: "In-scope steering",
 };
 
@@ -25,6 +25,7 @@ export default function MissionControl() {
   const [verifyFlash, setVerifyFlash] = useState(0);
   const [totalsOpen, setTotalsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
@@ -43,6 +44,11 @@ export default function MissionControl() {
   }, [state.shop.url]);
   useEffect(() => {
     setTotalsOpen(state.director.moment === "TOTALS" && state.director.status === "totals");
+    if (state.director.status === "report") {
+      if (state.director.decision_id) setReportId(state.director.decision_id);
+      else say("No blocked decision to report yet");
+    }
+    if (state.director.status === "results") window.location.href = "/results?from=control";
   }, [state.director]);
 
   const director = useCallback(async (path: string) => {
@@ -86,6 +92,7 @@ export default function MissionControl() {
       if (k === "ArrowRight" || k === " " || k === "PageDown") {
         e.preventDefault();
         setTotalsOpen(false);
+        setReportId(null);
         director("/director/next");
       } else if (k === "ArrowLeft" || k === "PageUp") {
         e.preventDefault();
@@ -98,14 +105,17 @@ export default function MissionControl() {
       else if (k === "f" || k === "F") {
         if (document.fullscreenElement) document.exitFullscreen();
         else document.documentElement.requestFullscreen().catch(() => {});
-      } else if (k === "Escape") setTotalsOpen(false);
+      } else if (k === "Escape") {
+        setTotalsOpen(false);
+        setReportId(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [director, tamper, reset, toggleMode]);
 
   const d = state.director;
-  const label = d.moment ? `${d.index >= 0 ? `${d.index + 1}/8 · ` : ""}${d.moment} ${MOMENT_NAMES[d.moment] ?? ""}` : null;
+  const label = d.moment ? `${d.index >= 0 ? `${d.index + 1}/${(d as { of?: number }).of ?? 9} · ` : ""}${d.moment} ${MOMENT_NAMES[d.moment] ?? ""}` : null;
   const revoked = state.mandate?.status === "REVOKED";
 
   return (
@@ -140,7 +150,7 @@ export default function MissionControl() {
 
         <div className="relative flex min-h-0 flex-col">
           <RightLane balance={state.right.balance} decision={state.right.decision} pending={!!state.right.pending}
-            lost={state.score.right_lost_paise} targetRef={rightRef} />
+            lost={state.score.right_lost_paise} targetRef={rightRef} onOpen={setReportId} />
           <RevokeSnap seq={state.revokeSeq} time={revoked ? hhmmss(state.mandate?.revoked_at ?? null) : null} />
         </div>
       </main>
@@ -150,6 +160,7 @@ export default function MissionControl() {
       <Packet id={state.packet ? `${state.packet.id}-${state.packet.seq}` : null} root={root} from={cartRef} left={leftRef} right={rightRef} />
       <DirectorBanner director={d} revoked={revoked} />
       <Totals open={totalsOpen} left={state.score.left_lost_paise} right={state.score.right_lost_paise} onClose={() => setTotalsOpen(false)} />
+      <ReportOverlay id={reportId} onClose={() => setReportId(null)} />
       {toast && <div className="absolute bottom-24 right-6 z-50 rounded-lg border border-line bg-surface px-4 py-2">{toast}</div>}
     </div>
   );

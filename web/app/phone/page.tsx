@@ -3,12 +3,14 @@
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, getJSON, hubWsUrl, postJSON, type LeashEvent } from "@/lib/hub";
-import { friendly } from "@/lib/friendly";
+import { friendly, shopName as shopNameOf } from "@/lib/friendly";
 import { inr } from "@/lib/money";
 import { phonePubkey, signObj } from "@/lib/phoneKey";
 
 type Item = { family: string; label: string; max_qty: number; brands: string[]; substitutes_ok: boolean };
-type FeedCard = { id: string; ok: boolean; text: string; amount: number; seq: number };
+type FeedCard = { id: string; ok: boolean; text: string; amount: number; seq: number; held?: boolean };
+type HeldReq = { decision_id: string; merchant: string; amount: string; reason: string; expires_at: string;
+  items: { brand: string; family: string; qty: number; unit: string }[] };
 
 const CATEGORIES = [
   { id: "dairy", label: "Dairy" },
@@ -194,6 +196,7 @@ function Live({ current, mine, reload, onError, onNew }: {
 }) {
   const [feed, setFeed] = useState<FeedCard[]>([]);
   const [spent, setSpent] = useState(0);
+  const [held, setHeld] = useState<HeldReq | null>(null);
   const mandateId = current?.mandate?.mandate_id;
   const revoked = current?.status === "REVOKED";
   const cap = current?.mandate?.limits?.per_week_paise ?? 50000;
@@ -211,9 +214,22 @@ function Live({ current, mine, reload, onError, onNew }: {
           setFeed([]); setSpent(0); seen.clear(); reload();
         }
         if (e.type === "mandate.revoked" || e.type === "mandate.signed") reload();
+        if (e.type === "stepup.requested") setHeld(e.data as HeldReq);
+        if (e.type === "stepup.resolved") {
+          setHeld((h) => (h && h.decision_id === e.data.decision_id ? null : h));
+          const ok = e.data.outcome === "ALLOWED";
+          setFeed((f) => f.map((c) => (c.id === e.data.decision_id
+            ? { ...c, ok, text: ok ? `Approved ${e.data.amount} · you said yes` : e.data.by === "phone" ? "Denied · you said no" : "Denied · no answer in 60 s" }
+            : c)));
+          if (ok) setSpent((s) => s + e.data.amount_paise);
+        }
         if (e.type !== "gateway.decision" || seen.has(e.data.decision_id)) return;
         seen.add(e.data.decision_id);
         const ok = e.data.outcome === "ALLOWED";
+        if (e.data.outcome === "HELD") {
+          setFeed((f) => [{ id: e.data.decision_id, ok: true, held: true, text: "Waiting for your approval", amount: 0, seq: e.seq }, ...f].slice(0, 30));
+          return;
+        }
         setFeed((f) => [{ id: e.data.decision_id, ok, text: friendly(e.data as never), amount: e.data.amount_paise, seq: e.seq }, ...f].slice(0, 30));
         if (ok) setSpent((s) => s + e.data.amount_paise);
       };
@@ -256,13 +272,16 @@ function Live({ current, mine, reload, onError, onNew }: {
         <AnimatePresence initial={false}>
           {feed.map((c) => (
             <motion.div key={c.id} layout initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }}
-              className={`rounded-xl border-2 px-4 py-3 font-semibold ${c.ok ? "border-success/70 bg-success/10 text-success" : "border-danger/70 bg-danger/10 text-danger"}`}>
-              {c.ok ? "✓ " : "✕ "}{c.text}
+              className={`rounded-xl border-2 px-4 py-3 font-semibold ${c.held ? "border-warn/70 bg-warn/10 text-warn" : c.ok ? "border-success/70 bg-success/10 text-success" : "border-danger/70 bg-danger/10 text-danger"}`}>
+              {c.held ? "⏳ " : c.ok ? "✓ " : "✕ "}{c.text}
             </motion.div>
           ))}
         </AnimatePresence>
         {feed.length === 0 && <div className="rounded-xl border border-line p-4 text-muted">Nothing yet. Attempts show up here live.</div>}
       </div>
+      <AnimatePresence>
+        {held && <StepUpSheet req={held} canSign={mine} onDone={() => setHeld(null)} onError={onError} />}
+      </AnimatePresence>
       <div className="sticky bottom-4 mt-4">
         {revoked ? (
           <div className="rounded-2xl border-2 border-danger py-5 text-center text-xl font-black text-danger">
@@ -307,5 +326,48 @@ function SlideToRevoke({ onRevoke, disabled }: { onRevoke: () => void; disabled:
         ⛓
       </motion.div>
     </div>
+  );
+}
+
+function StepUpSheet({ req, canSign, onDone, onError }: { req: HeldReq; canSign: boolean; onDone: () => void; onError: (e: string) => void }) {
+  const [left, setLeft] = useState(60);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const tick = () => setLeft(Math.max(0, Math.round((Date.parse(req.expires_at) - Date.now()) / 1000)));
+    tick();
+    const t = setInterval(tick, 500);
+    return () => clearInterval(t);
+  }, [req.expires_at]);
+  const answer = async (approve: boolean) => {
+    setBusy(true);
+    try {
+      await postJSON(api.gateway(`/stepup/${req.decision_id}`), signObj({ decision_id: req.decision_id, approve, ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") }));
+      onDone();
+    } catch (e) {
+      onError(`Couldn't answer: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const what = req.items.map((i) => `${i.brand} ${i.family}${i.qty > 1 ? ` ×${i.qty}` : ""}`).join(", ");
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 flex items-end bg-black/60">
+      <motion.div initial={{ y: 300 }} animate={{ y: 0 }} exit={{ y: 300 }} transition={{ type: "spring", damping: 26 }}
+        className="mx-auto w-full max-w-md rounded-t-3xl border-t-2 border-warn bg-surface px-6 pb-8 pt-6">
+        <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-line" />
+        <h2 className="text-2xl font-bold text-white">Approve this purchase?</h2>
+        <p className="mt-3 text-lg">
+          Your assistant wants <b className="text-white">{what}</b> for <b className="text-white">{req.amount}</b> at {shopNameOf(req.merchant)}.
+        </p>
+        <p className="mt-1 text-sm text-warn">Why you&apos;re asked: {req.reason}</p>
+        <div className="mt-6 flex gap-3">
+          <button disabled={busy || !canSign} onClick={() => answer(true)} className="flex-1 rounded-2xl bg-accent py-4 text-lg font-black text-bg disabled:opacity-40">Approve</button>
+          <button disabled={busy || !canSign} onClick={() => answer(false)} className="flex-1 rounded-2xl border-2 border-line py-4 text-lg font-bold text-white disabled:opacity-40">Deny</button>
+        </div>
+        <p className="mt-4 text-center text-sm text-muted">
+          {canSign ? `Auto-deny in ${left}s` : "This phone didn't sign the mandate, so it can't approve."}
+        </p>
+      </motion.div>
+    </motion.div>
   );
 }

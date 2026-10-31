@@ -32,3 +32,14 @@ body { font-family: var(--font-sans); font-size: 18px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* Dispute report: print-friendly variant */
+@media print {
+  @page { margin: 14mm; }
+  html, body { background: #fff !important; color: #111 !important; font-size: 12px; }
+  .no-print { display: none !important; }
+  .report { max-width: none; padding: 0; }
+  .report * { color: #111 !important; text-shadow: none !important; box-shadow: none !important; }
+  .report-card, .report-verdict { background: #fff !important; border-color: #999 !important; }
+  .report-verdict { border-width: 3px !important; }
+}

@@ -41,3 +41,19 @@ export function Totals({ open, left, right, onClose }: { open: boolean; left: nu
     </AnimatePresence>
   );
 }
+
+export function ReportOverlay({ id, onClose }: { id: string | null; onClose: () => void }) {
+  return (
+    <AnimatePresence>
+      {id && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="absolute inset-0 z-50 flex flex-col bg-bg/95 p-6">
+          <div className="mb-2 flex justify-end">
+            <button onClick={onClose} className="rounded-lg border border-line px-4 py-1 text-muted hover:text-white">Close (Esc)</button>
+          </div>
+          <iframe src={`/report/${id}?embed=1`} title="Dispute report" className="min-h-0 flex-1 rounded-card border border-line bg-bg" />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

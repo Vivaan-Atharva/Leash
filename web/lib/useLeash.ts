@@ -15,6 +15,8 @@ export type Decision = {
   merchant: string;
   checks: Check[];
   log_index?: number;
+  step_up?: { reason: string; expires_at: string } | null;
+  resolvedBy?: string;
   seq: number;
 };
 export type Payment = { id: string; amount_paise: number; merchant: string; request_id: string; seq: number };
@@ -35,6 +37,8 @@ export type Director = {
   moment: string | null;
   status: string | null;
   text?: string;
+  decision_id?: string | null;
+  playlist?: string;
   scenario?: string;
   name?: string;
   task?: string;
@@ -136,6 +140,12 @@ function reduce(s: State, a: Action): State {
     case "gateway.decision": {
       const dec = { ...(d as Decision), seq: e.seq };
       return { ...s, right: { ...s.right, decision: dec, decisions: [dec, ...s.right.decisions].slice(0, 20), pending: null } };
+    }
+    case "stepup.resolved": {
+      const dec = s.right.decision;
+      if (!dec || dec.decision_id !== d.decision_id) return s;
+      const upd = { ...dec, outcome: d.outcome, amount_paise: d.amount_paise, resolvedBy: d.by };
+      return { ...s, right: { ...s.right, decision: upd, decisions: s.right.decisions.map((x) => (x.decision_id === upd.decision_id ? upd : x)) } };
     }
     case "rail.debit":
       if (e.lane === "left") {

@@ -55,12 +55,13 @@ function Node({ n, name, check, decisionId, pending }: { n: number; name: string
 }
 
 export function Stamp({ decision }: { decision: Decision }) {
-  const delay = PACKET_MS / 1000 + ORDER.length * STAGGER + 0.05;
+  // A step-up resolution re-stamps right away; a fresh decision waits for the check nodes.
+  const delay = decision.resolvedBy ? 0.05 : PACKET_MS / 1000 + ORDER.length * STAGGER + 0.05;
   const blocked = decision.outcome !== "ALLOWED";
   const held = decision.outcome === "HELD";
   return (
     <motion.div
-      key={decision.decision_id}
+      key={`${decision.decision_id}-${decision.outcome}`}
       initial={{ opacity: 0, scale: 1.4, rotate: 0 }}
       animate={{ opacity: 1, scale: 1, rotate: blocked ? -8 : -3 }}
       transition={{ delay, type: "spring", stiffness: 420, damping: 18 }}
@@ -71,11 +72,16 @@ export function Stamp({ decision }: { decision: Decision }) {
       <div className="text-[1.4em] leading-tight short:text-[1.1em]">
         {held ? "HELD · APPROVE ON PHONE" : blocked ? "BLOCKED · ₹0 MOVED" : `ALLOWED · ${inr(decision.amount_paise)}`}
       </div>
+      {decision.resolvedBy && (
+        <div className="text-[0.6em] font-semibold tracking-widest opacity-80">
+          {decision.resolvedBy === "phone" ? (decision.outcome === "ALLOWED" ? "APPROVED ON ASHA'S PHONE" : "DENIED ON ASHA'S PHONE") : "NO APPROVAL IN 60 s"}
+        </div>
+      )}
     </motion.div>
   );
 }
 
-export function Pipeline({ decision, pending }: { decision: Decision | null; pending: boolean }) {
+export function Pipeline({ decision, pending, onOpen }: { decision: Decision | null; pending: boolean; onOpen?: (id: string) => void }) {
   const checks = new Map((decision?.checks ?? []).map((c) => [c.name, c]));
   const firstFail = decision?.checks.find((c) => !c.pass);
   return (
@@ -91,7 +97,8 @@ export function Pipeline({ decision, pending }: { decision: Decision | null; pen
       </div>
       <AnimatePresence mode="wait">
         {decision && (
-          <motion.div key={decision.decision_id} initial={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key={decision.decision_id} initial={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => onOpen?.(decision.decision_id)} className={onOpen ? "cursor-pointer" : ""} title="Open dispute report">
             <Stamp decision={decision} />
             <motion.div
               initial={{ opacity: 0, y: 6 }}
@@ -99,6 +106,9 @@ export function Pipeline({ decision, pending }: { decision: Decision | null; pen
               transition={{ delay: PACKET_MS / 1000 + 0.9 }}
               className="mt-5 short:mt-2 text-center"
             >
+              {decision.outcome === "HELD" && decision.step_up && (
+                <div className="text-[0.85em] text-warn">All six passed · step-up: {decision.step_up.reason}</div>
+              )}
               {firstFail && (
                 <div className="text-[0.85em] leading-snug text-body">
                   <span className="font-semibold text-danger">Check {firstFail.n} · {CHECK_LABEL[firstFail.name]}:</span> {firstFail.detail}

@@ -58,14 +58,15 @@ export function LeftLane({ balance, payments, lost, targetRef }: {
   );
 }
 
-export function RightLane({ balance, decision, pending, lost, targetRef }: {
+export function RightLane({ balance, decision, pending, lost, targetRef, onOpen }: {
   balance: number | null; decision: Decision | null; pending: boolean; lost: number; targetRef: React.RefObject<HTMLDivElement | null>;
+  onOpen?: (id: string) => void;
 }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4 short:gap-2">
       <h2 className="text-[1.3em] font-black tracking-[0.2em] text-success">WITH LEASH</h2>
       <Wallet balance={balance} tone="right" />
-      <div ref={targetRef} className="min-h-0 flex-1 overflow-hidden"><Pipeline decision={decision} pending={pending} /></div>
+      <div ref={targetRef} className="min-h-0 flex-1 overflow-hidden"><Pipeline decision={decision} pending={pending} onOpen={onOpen} /></div>
       <Lost paise={lost} tone="right" />
     </section>
   );
