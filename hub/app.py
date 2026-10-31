@@ -4,13 +4,17 @@ LEFT lane  = request goes straight to the rail (wallet L), no checks.
 RIGHT lane = request goes to the Leash gateway, which alone can debit wallet R.
 """
 import asyncio
+import os
+import re
+import subprocess
+import sys
 from collections import deque
 
 import httpx
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from shared.config import url
+from shared.config import ROOT, traces_dir, url
 from shared.models import EVENT_TYPES, LANES
 from shared.money import inr
 from shared.timeutil import now_iso
@@ -23,6 +27,12 @@ EVENTS: deque = deque(maxlen=2000)
 CLIENTS: set[WebSocket] = set()
 _seq = 0
 _mode = {"mode": "LIVE"}
+ACTIVE = {"scenario": None, "name": None, "attack": False, "mode": None}
+SCORE = {"left_paid_paise": 0, "right_paid_paise": 0, "left_lost_paise": 0, "right_lost_paise": 0}
+
+# Director moments (spec §6.4): → walks this list.
+MOMENTS = ["S0", "S1", "S2", "S3", "S4", "REVOKE", "S5", "TOTALS"]
+DIRECTOR = {"index": -1, "proc": None}
 
 
 async def publish(type_: str, lane: str, data: dict, ts: str | None = None) -> dict:
@@ -117,7 +127,23 @@ async def route(req: dict = Body(...)):
     })
     async with httpx.AsyncClient(timeout=5) as client:
         left, right = await asyncio.gather(_left(client, req), _right(client, req))
+    SCORE["left_paid_paise"] += left["amount_paise"]
+    SCORE["right_paid_paise"] += right["amount_paise"]
+    if ACTIVE["attack"]:
+        SCORE["left_lost_paise"] += left["amount_paise"]
+        SCORE["right_lost_paise"] += right["amount_paise"]
+    await publish("score.update", "system", _score())
     return {"request_id": req.get("request_id"), "left": left, "right": right}
+
+
+def _score() -> dict:
+    return {**SCORE, **{k.replace("_paise", ""): inr(v) for k, v in SCORE.items()},
+            "scenario": ACTIVE["scenario"]}
+
+
+@app.get("/score")
+async def score():
+    return _score()
 
 
 # ------------------------------------------------------------------ demo control
@@ -135,7 +161,12 @@ async def demo_reset():
             except httpx.HTTPError:
                 out[name] = False
     EVENTS.clear()
+    for k in SCORE:
+        SCORE[k] = 0
+    ACTIVE.update(scenario=None, name=None, attack=False, mode=None)
+    DIRECTOR["index"] = -1
     await publish("system.mode", "system", {"reset": True, **_mode, "services": out})
+    await publish("score.update", "system", _score())
     return {"ok": all(out.values()), "services": out}
 
 
@@ -174,6 +205,11 @@ async def preflight():
         bal = {k: v.get("balance_paise") for k, v in w.items()}
         add("both wallets at ₹5,000", bal == {"L": 500000, "R": 500000},
             ", ".join(f"{k} {inr(v)}" for k, v in sorted(bal.items()) if isinstance(v, int)))
+        golden = [sid for sid in MOMENTS if sid.startswith("S")
+                  and not (traces_dir() / "golden" / f"{sid}.json").exists()]
+        add("golden traces S0–S5", not golden,
+            "all present" if not golden else f"missing {', '.join(golden)} (REPLAY falls back to SCRIPTED)",
+            required=False)
         try:
             r = await client.get("http://127.0.0.1:11434/api/tags")
             add("ollama", r.status_code == 200, "running", required=False)
@@ -181,3 +217,98 @@ async def preflight():
             add("ollama", False, "not running (needed from Phase 2)", required=False)
     ok = all(i["ok"] for i in items if i["required"])
     return {"ok": ok, "items": items}
+
+
+# ------------------------------------------------------------------ director
+@app.post("/director/active")
+async def director_active(body: dict = Body(...)):
+    """The agent runner announces which scenario it is running (drives 'lost so far')."""
+    ACTIVE.update(scenario=body.get("scenario"), name=body.get("name"),
+                  attack=bool(body.get("attack")), mode=body.get("mode"))
+    return ACTIVE
+
+
+def _busy() -> bool:
+    p = DIRECTOR["proc"]
+    return p is not None and p.returncode is None
+
+
+async def _run_scenario(sid: str) -> dict:
+    if _busy():
+        return {"ok": False, "busy": True}
+    mode = "live" if _mode["mode"] == "LIVE" else "replay"
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "agent.runner", sid, "--mode", mode, cwd=str(ROOT), env=os.environ.copy(),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    DIRECTOR["proc"] = proc
+    asyncio.create_task(proc.wait())
+    return {"ok": True, "scenario": sid, "requested_mode": mode}
+
+
+async def _trigger(index: int) -> dict:
+    index = max(0, min(index, len(MOMENTS) - 1))
+    if _busy():
+        return {"ok": False, "busy": True, "index": DIRECTOR["index"]}
+    DIRECTOR["index"] = index
+    m = MOMENTS[index]
+    base = {"index": index, "moment": m, "of": len(MOMENTS)}
+    if m == "REVOKE":
+        await publish("director.moment", "system", {**base, "status": "prompt",
+                      "text": "Asha pulls the leash: slide to revoke on the phone."})
+        return {"ok": True, **base}
+    if m == "TOTALS":
+        await publish("director.moment", "system", {**base, "status": "totals", **_score()})
+        return {"ok": True, **base}
+    await publish("director.moment", "system", {**base, "scenario": m, "status": "starting"})
+    return {**(await _run_scenario(m)), **base}
+
+
+@app.get("/director")
+async def director_state():
+    return {"index": DIRECTOR["index"], "moments": MOMENTS, "busy": _busy(), **_mode, "active": ACTIVE}
+
+
+@app.post("/director/next")
+async def director_next():
+    return await _trigger(DIRECTOR["index"] + 1)
+
+
+@app.post("/director/prev")
+async def director_prev():
+    return await _trigger(DIRECTOR["index"] - 1)
+
+
+@app.post("/director/moment/{n}")
+async def director_moment(n: int):
+    return await _trigger(n)
+
+
+@app.post("/director/scenario/{sid}")
+async def director_scenario(sid: str):
+    """Keys 0–9: jump straight to a scenario (S6–S9 are outside the stage list)."""
+    sid = sid.upper()
+    if not re.fullmatch(r"S\d", sid):
+        return {"ok": False, "error": "bad scenario"}
+    if sid in MOMENTS:
+        return await _trigger(MOMENTS.index(sid))
+    await publish("director.moment", "system", {"index": DIRECTOR["index"], "moment": sid,
+                                                "scenario": sid, "status": "starting"})
+    return await _run_scenario(sid)
+
+
+# ------------------------------------------------------------------ network (QR for the phone)
+def _ipv4s() -> list[str]:
+    try:
+        out = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    ips = re.findall(r"inet (\d+\.\d+\.\d+\.\d+)", out)
+    return [ip for ip in ips if not ip.startswith(("127.", "169.254."))]
+
+
+@app.get("/netinfo")
+async def netinfo():
+    ips = _ipv4s()
+    host = os.environ.get("LEASH_PUBLIC_HOST") or (ips[0] if ips else "127.0.0.1")
+    web_port = os.environ.get("LEASH_WEB_PORT", "3000")
+    return {"ips": ips, "host": host, "phone_url": f"http://{host}:{web_port}/phone"}

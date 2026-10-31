@@ -86,6 +86,17 @@ def register_agent(body: dict = Body(...)):
     return {"ok": True}
 
 
+@app.get("/agents/current")
+def current_agent():
+    """The agent key Asha's phone puts into the mandate it signs."""
+    return {"agent_pubkey": public_key("agent")}
+
+
+@app.get("/time")
+def server_time():
+    return {"now": now_iso()}
+
+
 @app.post("/mandates")
 def create_mandate(raw: dict = Body(...)):
     try:
@@ -265,6 +276,8 @@ def pay(raw: dict = Body(...)):
         "amount_paise": amount, "amount": inr(amount), "decided_in_us": decided_in_us,
         "failing": [r.n for r in results if not r.passed], "merchant": decision["merchant"],
         "reasons": [f"Check {r.n} · {r.name}: {r.detail}" for r in results if not r.passed],
+        "checks": [r.wire() for r in results], "settlement_error": settlement_error,
+        "log_index": decision["log_index"],
     })
     return decision
 

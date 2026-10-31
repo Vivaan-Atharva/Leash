@@ -118,16 +118,17 @@ def search(request: Request, shop_id: str, q: str = "", format: str = "html"):
 
 
 @app.get("/{shop_id}/product/{sku}", response_class=HTMLResponse)
-def product_page(request: Request, shop_id: str, sku: str):
+def product_page(request: Request, shop_id: str, sku: str, view: int = 0):
     shop = _shop(shop_id)
     p = product(shop_id, sku)
     if not p:
         raise HTTPException(404, "no such product")
     inj = injections_for(shop_id, p["key"])
-    emit("shop.page_viewed", "both", {"shop": shop_id, "merchant": shop["domain"], "sku": sku,
-                                      "name": p["name"], "price": p["price"],
-                                      "url": f"/{shop_id}/product/{sku}",
-                                      "injections": [{"style": i["style"], "label": i["label"]} for i in inj]})
+    if not view:  # ?view=1 is Mission Control's embedded preview, not the agent
+        emit("shop.page_viewed", "both", {
+            "shop": shop_id, "merchant": shop["domain"], "sku": sku, "name": p["name"],
+            "price": p["price"], "url": f"/{shop_id}/product/{sku}",
+            "injections": [{"style": i["style"], "label": i["label"]} for i in inj]})
     return templates.TemplateResponse(request, "product.html", {
         "shop": shop, "shop_id": shop_id, "p": p, "injections": inj})
 

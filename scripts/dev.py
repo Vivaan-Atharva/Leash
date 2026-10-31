@@ -1,4 +1,5 @@
 """`make dev`: start hub, rail, gateway and shops; reset to seed; Ctrl-C stops all."""
+import os
 import signal
 import sys
 
@@ -10,6 +11,7 @@ from shared.keys import ensure_keys
 
 if __name__ == "__main__":
     ensure_keys()
+    os.environ.setdefault("LEASH_BIND", "0.0.0.0")  # so Asha's phone can reach us over the hotspot
     procs = start_all()
     httpx.post(f"{url('hub')}/demo/reset", timeout=10).raise_for_status()
     print("Leash services up:")
