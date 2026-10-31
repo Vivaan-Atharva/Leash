@@ -7,3 +7,4 @@ jinja2>=3.1
 pytest>=8
 websockets>=12
 matplotlib>=3.8
+z3-solver>=4.12

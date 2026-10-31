@@ -50,8 +50,22 @@ def gw_key():
     return _gw_key
 
 
+def _leaves(conn) -> list[bytes]:
+    return [bytes.fromhex(r[0]) for r in conn.execute("SELECT leaf FROM merkle_leaves ORDER BY idx")]
+
+
+def _sign_tree_head(conn) -> dict:
+    from gateway import merkle
+    leaves = _leaves(conn)
+    sth = sign_obj({"tree_size": len(leaves), "root_hash": merkle.root(leaves).hex(), "timestamp": now_iso()},
+                   gw_key())
+    store.kv_set(conn, "sth", sth)
+    return sth
+
+
 def _log(conn, type_: str, payload: dict) -> dict:
     e = audit.append(conn, type_, payload, now_iso())
+    _sign_tree_head(conn)
     emit("log.appended", "right", {"index": e["index"], "type": type_, "hash": e["hash"]})
     return e
 
@@ -125,6 +139,38 @@ def create_mandate(raw: dict = Body(...)):
         _store_mandate(conn, raw)
     emit("mandate.signed", "right", {"mandate_id": m.mandate_id, "user": m.user.name})
     return {"ok": True, "mandate_id": m.mandate_id}
+
+
+def _exposure(mandate: dict, profiles: tuple[str, ...] | None = None) -> dict:
+    from gateway import formal  # Z3 loads only for analysis, never on the payment path
+    with store.connect() as conn:
+        block = store.kv_get(conn, "block_amount", 500000)
+    try:
+        return {"ok": True, **formal.analyse(mandate, block, profiles or formal.PROFILES)}
+    except ImportError:
+        return {"ok": False, "error": "z3-solver not installed (pip install z3-solver)"}
+
+
+@app.post("/mandates/analyze")
+def analyze_mandate(body: dict = Body(...)):
+    """Worst-case exposure for a draft mandate (the phone calls this as Asha moves the sliders)."""
+    try:
+        Mandate.model_validate({**{k: v for k, v in body.items() if k != "profiles"},
+                                "signature": body.get("signature", "draft")})
+    except ValidationError as e:
+        raise HTTPException(422, f"malformed mandate: {e.errors()[:2]}")
+    profiles = tuple(body.get("profiles") or ("none", "rails", "leash"))
+    return _exposure({k: v for k, v in body.items() if k != "profiles"}, profiles)
+
+
+@app.get("/mandates/current/exposure")
+def current_exposure():
+    with store.connect() as conn:
+        mid = store.current_mandate_id(conn)
+        raw, _ = store.get_mandate(conn, mid) if mid else (None, None)
+    if not raw:
+        raise HTTPException(404, "no mandate")
+    return {"mandate_id": raw["mandate_id"], **_exposure(raw)}
 
 
 @app.get("/mandates/current")
@@ -448,6 +494,7 @@ def get_report(decision_id: str):
         resolution = json.loads(srow[0]) if srow and srow[0] else None
         chain = audit.verify(conn)
         entries = audit.entries(conn)
+        merkle_proof = _merkle_proof(conn, decision.get("log_index") or 0)
     gw_pub = public_key("gateway")
     signed_decision = {k: v for k, v in decision.items() if k not in ("log_index", "log_hash")}
     log_entry = next((e for e in entries if e["index"] == decision.get("log_index")), None)
@@ -484,6 +531,7 @@ def get_report(decision_id: str):
         "chain": {**chain, "decision_entry_matches": bool(log_entry) and log_entry["payload"] == signed_decision
                   and log_entry["hash"] == decision.get("log_hash")},
         "timeline": timeline,
+        "merkle": merkle_proof,
         "verdict": report.verdict(decision, resolution, revoked_at),
     }
 
@@ -501,6 +549,46 @@ def verify_decision(decision_id: str):
 def get_log(from_: int = 1, limit: int = 500):
     with store.connect() as conn:
         return {"entries": audit.entries(conn, from_)[:limit]}
+
+
+@app.get("/log/sth")
+def signed_tree_head():
+    """The latest Signed Tree Head (RFC 6962 style), signed by the gateway key."""
+    with store.connect() as conn:
+        return {"sth": store.kv_get(conn, "sth"), "gateway_pubkey": public_key("gateway")}
+
+
+def _merkle_proof(conn, index: int) -> dict | None:
+    from gateway import merkle
+    sth = store.kv_get(conn, "sth")
+    if not sth or index < 1:
+        return None
+    leaves = _leaves(conn)[: sth["tree_size"]]
+    if index > len(leaves):
+        return None
+    row = conn.execute("SELECT idx, timestamp, type, payload, prev_hash FROM log WHERE idx=?", (index,)).fetchone()
+    entry = None
+    if row:
+        try:
+            entry = {"index": row[0], "timestamp": row[1], "type": row[2], "payload": json.loads(row[3]), "prev_hash": row[4]}
+        except ValueError:
+            entry = {"index": row[0], "timestamp": row[1], "type": row[2], "payload": {"_unparseable": row[3]}, "prev_hash": row[4]}
+    proof = [h.hex() for h in merkle.inclusion_proof(index - 1, leaves)]
+    recomputed = merkle.leaf_hash(merkle.leaf_bytes(**{("type_" if k == "type" else k): v for k, v in entry.items()})) if entry else b""
+    ok = bool(entry) and merkle.verify_inclusion(index - 1, sth["tree_size"], recomputed,
+                                                 [bytes.fromhex(h) for h in proof], bytes.fromhex(sth["root_hash"]))
+    return {"leaf_index": index - 1, "entry": entry, "proof": proof, "sth": sth,
+            "gateway_pubkey": public_key("gateway"), "verified_by_gateway": ok,
+            "sth_signature_ok": verify_obj(sth, public_key("gateway"))}
+
+
+@app.get("/log/proof/{index}")
+def log_proof(index: int):
+    with store.connect() as conn:
+        p = _merkle_proof(conn, index)
+    if not p:
+        raise HTTPException(404, "no such entry or no tree head yet")
+    return p
 
 
 @app.get("/log/verify")

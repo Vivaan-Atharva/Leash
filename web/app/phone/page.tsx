@@ -86,6 +86,29 @@ function Setup({ pub, onSigned, onError }: { pub: string | null; onSigned: () =>
   const [perWeek, setPerWeek] = useState(500);
   const [items, setItems] = useState<Item[]>(DEFAULT_ITEMS);
   const [busy, setBusy] = useState(false);
+  const [worst, setWorst] = useState<{ total: number; wrong: number; off: number; over: number; none: number; ms: number } | null>(null);
+  // Re-prove the worst case whenever the leash changes (debounced).
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const draft = {
+          mandate_id: "mdt_draft", user: { id: "usr_asha", name: "Asha", phone_pubkey: pub ?? "draft" }, agent_pubkey: "draft",
+          reserve_block_id: "blk_r_01", allowed_merchants: shops, allowed_categories: cats,
+          limits: { per_order_paise: perOrder * 100, per_week_paise: perWeek * 100 },
+          intent: { items: items.map(({ family, max_qty, brands, substitutes_ok }) => ({ family, max_qty, brands, substitutes_ok })) },
+          price_band_pct: 15, step_up: { new_brand: true, order_over_pct_of_cap: 70 }, valid_from: "x", valid_until: "x", profiles: ["none", "leash"],
+        };
+        const r = await postJSON(api.gateway("/mandates/analyze"), draft);
+        if (!r.ok) return setWorst(null);
+        const L = r.profiles.leash;
+        setWorst({ total: L.total.value_paise, wrong: L.wrong_shop.value_paise, off: L.off_list.value_paise,
+          over: L.overpay.value_paise, none: r.profiles.none.total.value_paise, ms: r.ms });
+      } catch {
+        setWorst(null);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [cats, shops, perOrder, perWeek, items, pub]);
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
   const sign = async () => {
@@ -151,6 +174,18 @@ function Setup({ pub, onSigned, onError }: { pub: string | null; onSigned: () =>
           </div>
         ))}
       </Field>
+      {worst && (
+        <div className="rounded-2xl border-2 border-accent/70 bg-surface p-4">
+          <div className="text-sm font-semibold uppercase tracking-widest text-accent">If your assistant is hijacked</div>
+          <div className="mt-1 text-3xl font-black text-white">at most {inr(worst.total)}<span className="text-lg font-semibold text-muted"> a week</span></div>
+          <ul className="mt-2 space-y-0.5 text-[15px]">
+            <li><b className="text-success">{inr(worst.wrong)}</b> to shops you didn&apos;t pick</li>
+            <li><b className="text-success">{inr(worst.off)}</b> on things not on your list</li>
+            <li>at most <b className="text-white">{inr(worst.over)}</b> above fair prices</li>
+          </ul>
+          <div className="mt-2 text-xs text-muted">Proven with the Z3 solver in {worst.ms} ms. Without Leash: {inr(worst.none)}.</div>
+        </div>
+      )}
       <button onClick={sign} disabled={busy || !pub || shops.length === 0}
         className="rounded-2xl bg-accent py-5 text-xl font-black text-bg glow-accent disabled:opacity-50">
         {busy ? "Signing…" : "Sign with this phone"}

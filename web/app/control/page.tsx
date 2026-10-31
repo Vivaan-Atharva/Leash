@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AttackTraceOverlay } from "@/components/AttackTrace";
 import { ChainBar } from "@/components/ChainBar";
+import { ProofOverlay } from "@/components/Proof";
 import { LeftLane, RightLane } from "@/components/Lanes";
 import { DirectorBanner, ReportOverlay, Totals } from "@/components/Overlays";
 import { Packet } from "@/components/Packet";
@@ -28,6 +29,7 @@ export default function MissionControl() {
   const [toast, setToast] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [proofOpen, setProofOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
@@ -99,6 +101,7 @@ export default function MissionControl() {
         setTotalsOpen(false);
         setReportId(null);
         setTraceOpen(false);
+        setProofOpen(false);
         director("/director/next");
       } else if (k === "ArrowLeft" || k === "PageUp") {
         e.preventDefault();
@@ -106,6 +109,7 @@ export default function MissionControl() {
       } else if (/^[0-9]$/.test(k)) director(`/director/scenario/S${k}`);
       else if (k === "x" || k === "X") setXray((v) => !v);
       else if (k === "a" || k === "A") setTraceOpen((v) => !v);
+      else if (k === "p" || k === "P") setProofOpen((v) => !v);
       else if (k === "t" || k === "T") tamper();
       else if (k === "r" || k === "R") reset();
       else if (k === "l" || k === "L") toggleMode();
@@ -116,6 +120,7 @@ export default function MissionControl() {
         setTotalsOpen(false);
         setReportId(null);
         setTraceOpen(false);
+        setProofOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -171,6 +176,7 @@ export default function MissionControl() {
       <Packet id={state.packet ? `${state.packet.id}-${state.packet.seq}` : null} root={root} from={cartRef} left={leftRef} right={rightRef} />
       <DirectorBanner director={d} revoked={revoked} />
       <Totals open={totalsOpen} left={state.score.left_lost_paise} right={state.score.right_lost_paise} onClose={() => setTotalsOpen(false)} />
+      <ProofOverlay open={proofOpen} onClose={() => setProofOpen(false)} />
       <AttackTraceOverlay open={traceOpen} trace={trace} cf={cf} cfRunning={!!state.cfRunning} onClose={() => setTraceOpen(false)} />
       <ReportOverlay id={reportId} onClose={() => setReportId(null)} />
       {toast && <div className="absolute bottom-24 right-6 z-50 rounded-lg border border-line bg-surface px-4 py-2">{toast}</div>}
